@@ -10,8 +10,10 @@ version = 1.0.0
 requirements = python3,kivy,kivymd,libiconv,libffi
 icon.filename = icon.png
 # presplash.filename = presplash.png # 启动界面图片
-fullscreen = 0 # 0=不启用全屏，1=启用全屏
-orientation = portrait # 应用竖屏
+# 0=不启用全屏，1=启用全屏
+fullscreen = 0
+# 应用竖屏
+orientation = portrait
 entrypoint = main.py
 android.accept_sdk_license = True
 android.allow_api_min = 21

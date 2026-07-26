@@ -1,4 +1,4 @@
-name: Build Kivy Android APK
+name: Build LanPlay Monitor APK
 
 on:
   workflow_dispatch:
@@ -7,12 +7,12 @@ permissions:
   contents: write
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-22.04
 
     steps:
     # ===== 1. 拉取代码 =====
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
 
     # ===== 2. Java 17 =====
@@ -22,104 +22,107 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # ===== 3. 安装系统依赖 + Docker =====
-    - name: Install dependencies
+    # ===== 3. Python 3.10 =====
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # ===== 4. 系统依赖 =====
+    - name: Install system deps
       run: |
         sudo apt-get update
         sudo apt-get install -y \
             git zip unzip curl \
-            python3-pip pngquant
+            python3-pip autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses5-dev cmake \
+            libffi-dev libssl-dev pngquant
 
-    # ===== 4. 生成签名 Keystore =====
-    - name: Generate signing key
-      id: generate_key
+    # ===== 5. 安装 p4a（不用 Buildozer！）=====
+    - name: Install p4a
       run: |
-        KEYSTORE="com.lanplay.monitor.keystore"
-        ALIAS="com.lanplay.monitor"
+        python -m pip install --upgrade pip
+        pip install "cython<3.1"
+        pip install python-for-android==2024.1.21
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    # ===== 6. 生成签名 Keystore =====
+    - name: Generate keystore
+      id: key
+      run: |
         keytool -genkey -v \
-          -keystore "$KEYSTORE" \
-          -alias "$ALIAS" \
+          -keystore com.lanplay.monitor.keystore \
+          -alias com.lanplay.monitor \
           -keyalg RSA -keysize 2048 \
           -validity 10000 \
           -storepass android \
           -keypass android \
-          -dname "CN=LanPlay, OU=Monitor, O=LanPlay, L=Unknown, ST=Unknown, C=Unknown"
+          -dname "CN=LanPlay, OU=Monitor, O=LanPlay"
         echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
 
-    # ===== 5. 清理旧构建 =====
-    - name: Clean old builds
+    # ===== 7. 清理 =====
+    - name: Clean
       run: |
-        rm -rf .buildozer bin/ release.log
+        rm -rf .buildozer bin/ dist/ *.apk
         mkdir -p bin
+        p4a clean_builds 2>/dev/null || true
+        p4a clean_dists 2>/dev/null || true
 
-    # ===== 6. 用 Docker 构建 APK（核心）=====
-    - name: Build APK with p4a Docker
+    # ===== 8. 用 p4a 直接构建 APK =====
+    - name: Build APK
       id: build_apk
       run: |
-        echo "=== Pulling p4a Docker image ==="
-        docker pull kivy/python-for-android:latest
+        export PATH="$HOME/.local/bin:$PATH"
 
-        echo "=== Running Docker build ==="
-        docker run --rm \
-          -v "$PWD":/app \
-          -w /app \
-          -e ANDROID_SDK_ROOT=/opt/android-sdk \
-          -e ANDROID_HOME=/opt/android-sdk \
-          kivy/python-for-android:latest \
-          bash -c "
-            set -e
-            echo '=== Installing Python deps ==='
-            pip install kivy==2.3.0 pyjnius==1.4.2 --no-deps 2>&1 | tail -5 || true
+        echo "=== p4a version ==="
+        p4a --version
 
-            echo '=== Generating keystore in container ==='
-            keytool -genkey -v \
-              -keystore /app/com.lanplay.monitor.keystore \
-              -alias com.lanplay.monitor \
-              -keyalg RSA -keysize 2048 \
-              -validity 10000 \
-              -storepass android \
-              -keypass android \
-              -dname 'CN=LanPlay, OU=Monitor, O=LanPlay'
+        echo "=== Building APK ==="
+        # 直接用 p4a apk 命令，不通过 buildozer
+        # 这样完全绕过 AAB 检测
+        p4a \
+          --storage-dir=.buildozer \
+          apk \
+          --requirements=python3,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi \
+          --private=. \
+          --package=com.lanplay.monitor \
+          --name=LanPlayMonitor \
+          --version=1.0.0 \
+          --orientation=portrait \
+          --permission=INTERNET \
+          --window \
+          --enable-androidx \
+          --android-api=33 \
+          --ndk=25b \
+          --arch=arm64-v8a \
+          --arch=armeabi-v7a \
+          2>&1 | tee build.log
 
-            echo '=== Running p4a build ==='
-            p4a --storage-dir=/app/.buildozer \
-                apk \
-                --requirements=python3,kivy,pyjnius,libiconv,libffi \
-                --private=/app \
-                --package=com.lanplay.monitor \
-                --name=LanPlayMonitor \
-                --version=1.0.0 \
-                --orientation=portrait \
-                --permission=INTERNET \
-                --window \
-                --enable-androidx \
-                --android-api=33 \
-                --ndk=25b \
-                2>&1 | tee /app/release.log
+        echo "=== Looking for APK ==="
+        find .buildozer -name "*.apk" -type f | while read f; do
+          echo "✅ Found: $f ($(du -h "$f" | cut -f1))"
+          cp "$f" "bin/$(basename "$f")"
+        done
 
-            echo '=== APKs in container ==='
-            find /app -name '*.apk' -type f
-          "
-
-        echo "=== Checking APK on host ==="
-        find . -name "*.apk" -type f | while read f; do
-          echo "✅ $f ($(du -h "$f" | cut -f1))"
+        # 也检查当前目录
+        find . -maxdepth 2 -name "*.apk" -type f | while read f; do
+          echo "✅ Found: $f"
           cp "$f" "bin/$(basename "$f")"
         done
 
         if [ -z "$(ls -A bin/ 2>/dev/null)" ]; then
-          echo "❌ No APK found after Docker build!"
-          echo "=== .buildozer contents ==="
-          find .buildozer -type f 2>/dev/null | head -30 || echo "(empty)"
-          echo "=== release.log tail ==="
-          tail -50 release.log 2>/dev/null || echo "(no log)"
+          echo "❌ No APK generated!"
+          echo "=== .buildozer tree ==="
+          find .buildozer -type f 2>/dev/null | head -50
+          echo "=== build.log tail ==="
+          tail -80 build.log
           exit 1
         fi
 
-        echo "✅ bin/ contents:"
+        echo "=== bin/ ==="
         ls -lh bin/
 
-    # ===== 7. 签名 APK =====
+    # ===== 9. 签名 APK =====
     - name: Sign APK
       run: |
         APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
@@ -128,61 +131,29 @@ jobs:
           exit 1
         fi
 
-        echo "APK to sign: $APK"
+        echo "Signing: $APK"
 
-        # 查找 zipalign 和 apksigner（在 Docker 容器里也有）
-        docker run --rm \
-          -v "$PWD":/app \
-          -w /app \
-          kivy/python-for-android:latest \
-          bash -c "
-            # 用 Android SDK 里的工具签名
-            SDK=/opt/android-sdk
-            BUILD_TOOLS=\$(ls -d \$SDK/build-tools/*/ 2>/dev/null | sort | tail -1)
-            echo \"Build tools: \$BUILD_TOOLS\"
+        # 找 build-tools
+        SDK="/usr/local/lib/android/sdk"
+        BT=$(ls -d $SDK/build-tools/*/ 2>/dev/null | sort | tail -1)
 
-            if [ -f \"\$BUILD_TOOLS/zipalign\" ] && [ -f \"\$BUILD_TOOLS/apksigner\" ]; then
-              echo '=== Zipalign ==='
-              \$BUILD_TOOLS/zipalign -v 4 /app/$APK /app/bin/LanPlayMonitor-1.0.0-aligned.apk
-
-              echo '=== Sign ==='
-              \$BUILD_TOOLS/apksigner sign \
-                --ks /app/com.lanplay.monitor.keystore \
-                --ks-key-alias com.lanplay.monitor \
-                --ks-pass pass:android \
-                --key-pass pass:android \
-                --out /app/bin/LanPlayMonitor-1.0.0-release.apk \
-                /app/bin/LanPlayMonitor-1.0.0-aligned.apk
-
-              echo '✅ Signed APK created'
-              ls -lh /app/bin/LanPlayMonitor-1.0.0-release.apk
-            else
-              echo '⚠️ No build-tools found in Docker, trying host...'
-              ls -la \$SDK/build-tools/ 2>/dev/null || echo 'No SDK on host'
-            fi
-          "
-
-        # 检查宿主机是否有 build-tools
-        if [ ! -f "bin/LanPlayMonitor-1.0.0-release.apk" ]; then
-          SDK="/usr/local/lib/android/sdk"
-          BUILD_TOOLS=$(ls -d $SDK/build-tools/*/ 2>/dev/null | sort | tail -1)
-          if [ -n "$BUILD_TOOLS" ]; then
-            echo "=== Using host build-tools: $BUILD_TOOLS ==="
-            "$BUILD_TOOLS/zipalign" -v 4 "$APK" "bin/LanPlayMonitor-1.0.0-aligned.apk" 2>&1 || cp "$APK" "bin/LanPlayMonitor-1.0.0-aligned.apk"
-            "$BUILD_TOOLS/apksigner" sign \
-              --ks "$PWD/com.lanplay.monitor.keystore" \
-              --ks-key-alias "com.lanplay.monitor" \
-              --ks-pass pass:android \
-              --key-pass pass:android \
-              --out "bin/LanPlayMonitor-1.0.0-release.apk" \
-              "bin/LanPlayMonitor-1.0.0-aligned.apk" 2>&1 || true
-          fi
+        if [ -n "$BT" ] && [ -f "$BT/zipalign" ] && [ -f "$BT/apksigner" ]; then
+          ALIGNED="bin/LanPlayMonitor-aligned.apk"
+          SIGNED="bin/LanPlayMonitor-1.0.0-release.apk"
+          "$BT/zipalign" -v 4 "$APK" "$ALIGNED" 2>&1 || cp "$APK" "$ALIGNED"
+          "$BT/apksigner" sign \
+            --ks "$PWD/com.lanplay.monitor.keystore" \
+            --ks-key-alias "com.lanplay.monitor" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED" "$ALIGNED" 2>&1
+          echo "✅ Signed: $SIGNED"
+        else
+          echo "⚠️ No build-tools found, APK left unsigned"
+          ls -lh bin/
         fi
 
-        echo "=== Final bin/ ==="
-        ls -lh bin/
-
-    # ===== 8. 上传 APK =====
+    # ===== 10. 上传 APK =====
     - name: Upload APK
       if: success()
       uses: actions/upload-artifact@v4
@@ -191,21 +162,21 @@ jobs:
         path: bin/*.apk
         retention-days: 30
 
-    # ===== 9. 上传 Keystore =====
+    # ===== 11. 上传 Keystore =====
     - name: Upload keystore
-      if: steps.generate_key.outputs.KEY_CREATED == 'true'
+      if: steps.key.outputs.KEY_CREATED == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: android-keystore
         path: com.lanplay.monitor.keystore
         retention-days: 1
 
-    # ===== 10. 上传日志 =====
+    # ===== 12. 上传日志 =====
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
         path: |
-          release.log
+          build.log
         retention-days: 7

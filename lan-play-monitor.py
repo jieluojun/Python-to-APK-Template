@@ -10,7 +10,7 @@
 
 启动：
     python Lan-Play房间监控2.0.py
-    # 浏览器打开 http://127.0.0.1:5000/
+    # 浏览器打开 http://0.0.0.0:5000/
 
 局域网访问：
     HOST=0.0.0.0 python Lan-Play房间监控2.0.py
@@ -42,7 +42,7 @@
 - rest：switch-lan-play Node 版，GET /info（通常只有在线人数，没有房间详情）。
 
 环境变量：
-    HOST=127.0.0.1
+    HOST=0.0.0.0
     PORT=5000
     DEBUG=0
     CACHE_TTL=12
@@ -1686,7 +1686,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
 # 备用
 # if __name__ == "__main__":
-    # host = os.getenv("HOST", "127.0.0.1")
+    # host = os.getenv("HOST", "0.0.0.0")
     # port = int(os.getenv("PORT", "5000"))
 
     # print(f"[启动] {APP_NAME}")
@@ -1710,7 +1710,7 @@ if __name__ == "__main__":
     import webbrowser
     import subprocess
 
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "5000"))
     url = f"http://{host}:{port}/"
 

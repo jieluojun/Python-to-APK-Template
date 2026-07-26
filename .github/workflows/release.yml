@@ -1,237 +1,83 @@
-name: Build Kivy Android APK In Release Mode
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
-  actions: read
-  checks: read
-
-env:
-  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-  ANDROID_HOME: /usr/local/lib/android/sdk
-  JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
-  CYTHON_LANGUAGE_LEVEL: "3"
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
+name: release
+on: workflow_dispatch
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Java 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.9'
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
             git zip unzip \
             python3-pip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev \
             libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev \
-            pngquant
+            curl unzip openjdk-17-jdk libltdl-dev
 
-    - name: Install Buildozer and dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install buildozer cython==0.29.33
-        pip install kivy==2.3.0
-        pip install python-for-android
+      - name: Install Buildozer and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer cython==0.29.33 kivy kivymd
+          # 确保 buildozer 在 PATH 中
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    - name: Optimize PNG assets
-      run: |
-        echo "=== Compressing PNG assets ==="
-        for f in icon.png icon_foreground.png icon_background.png presplash.png; do
-          if [ -f "$f" ]; then
-            pngquant --quality=60-80 --force --output "$f.q" "$f" && mv "$f.q" "$f" || true
-            echo "  $f: $(du -h "$f" | cut -f1)"
-          fi
-        done
+      # ✅ 新增：强制清理旧的构建缓存（关键！）
+      - name: Clean previous builds
+        run: |
+          echo "Cleaning old builds..."
+          rm -rf .buildozer bin/*.apk bin/*.aab
+          buildozer android clean || true
 
-    - name: Generate signing key (if not exists)
-      id: generate_key
-      run: |
-        KEYSTORE="com.lanplay.monitor.keystore"
-        ALIAS="com.lanplay.monitor"
-        if [ ! -f "$KEYSTORE" ]; then
-          echo "Creating new keystore..."
-          keytool -genkey -v \
-            -keystore "$KEYSTORE" \
-            -alias "$ALIAS" \
-            -keyalg RSA -keysize 2048 \
-            -validity 10000 \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Unknown, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown"
-          echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
-        else
-          echo "Using existing keystore."
-          echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
-        fi
+      # ✅ 新增：先跑 Debug 模式保底（最稳定，一定能出包）
+      - name: Build Debug APK (Stable Fallback)
+        run: |
+          echo "Building Debug APK (Stable Mode)..."
+          buildozer -v android debug
+          echo "Debug build finished."
+          ls -l bin/*.apk # 打印出来看看有没有
 
-    - name: Build APK (force apk format)
-      run: |
-        export PATH="$HOME/.local/bin:$PATH"
+      # ✅ 新增：如果 Debug 成功，再尝试 Release 模式（带体积优化）
+      - name: Build Release APK (Optimized)
+        if: success()
+        run: |
+          echo "Building Release APK (Optimized)..."
+          # 确保配置是 APK 模式
+          sed -i 's/android.release = True/android.aab = False/' buildozer.spec
+          buildozer -v android release
+          echo "Release build finished."
+          ls -l bin/*.apk # 打印出来看看有没有
 
-        echo "=== Environment ==="
-        java -version 2>&1
-        python --version
-        buildozer --version 2>&1 || true
+      # ✅ 上传产物
+      - name: Upload APK artifact
+        if: success() || failure() # 即使失败也上传，方便查日志
+        uses: actions/upload-artifact@v4
+        with:
+          name: kivy-app-build
+          path: bin/*.apk
+          retention-days: 7
 
-        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
-
-        # p4a 签名环境变量
-        export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
-        export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
-        export P4A_RELEASE_KEYSTORE_PASSWD="android"
-        export P4A_RELEASE_KEYALIAS_PASSWD="android"
-
-        # 清理
-        buildozer android clean 2>&1 | tee clean.log || true
-
-        echo "=== Building APK (NOT AAB) ==="
-        # 关键: 用 `android apk` 而非 `android release`
-        # `android release` 在某些 p4a 版本会输出 AAB
-        # `android apk` 明确指定输出 APK 格式
-        buildozer -v android apk 2>&1 | tee buildozer.log
-        BUILD_EXIT_CODE=${PIPESTATUS[0]}
-        echo "Build exit code: $BUILD_EXIT_CODE"
-
-        echo "=== Looking for *.apk ==="
-        find . -name "*.apk" 2>/dev/null | while read f; do
-          echo "✅ Found APK: $f ($(du -h "$f" | cut -f1))"
-        done
-
-        echo "=== Looking for *.aab (should be empty) ==="
-        find . -name "*.aab" 2>/dev/null | while read f; do
-          echo "⚠️ Found AAB: $f ($(du -h "$f" | cut -f1))"
-        done
-
-        # 收集 APK 到 bin/
-        mkdir -p bin
-        find . -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
-
-        # 如果 bin/ 里只有 aab 没有 apk, 尝试从 aab 转换
-        if ! ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "⚠️ No APK found in bin/, checking if we need to use bundletool..."
-          echo "BUILD_APK_FAILED=true" >> $GITHUB_OUTPUT
-        else
-          echo "BUILD_APK_FAILED=false" >> $GITHUB_OUTPUT
-        fi
-
-        echo "=== Final bin/ contents ==="
-        ls -lh bin/ 2>/dev/null
-
-    - name: Sign APK with keystore
-      run: |
-        # 强制查找最新的 APK 文件
-        APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
-        if [ -z "$APK" ]; then
-          echo "❌ No APK found, trying fallback conversion..."
-          # 如果没有 APK，尝试转换 AAB 为 Universal APK
-          AAB=$(ls -t bin/*.aab 2>/dev/null | head -1)
-          if [ -z "$AAB" ]; then
-            echo "❌ No AAB found either, build failed!"
-            exit 1
-          fi
-          echo "🔄 Converting $AAB to Universal APK..."
-          # 使用 bundletool 转换 (如果仓库里没有，需要加一个下载步骤)
-          # 这里假设你有 bundletool.jar 或者直接用 apksigner 处理
-          # 简单方案：直接用 Buildozer 再打包一次 APK（推荐，最简单）
-          buildozer -v android apk
-          APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            echo "❌ Still no APK after retry, aborting."
-            exit 1
-          fi
-        fi
-        echo "✅ Found APK: $APK"
-        # 继续签名...
-        jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore my.keystore -storepass android -keypass android "$APK" alias_name
-        # (注意：上面的 jarsigner 命令可能需要根据你的 keystore 调整，或者直接用 buildozer 的 sign 功能)
-        # 更推荐的做法是直接用 buildozer 的 sign 功能：
-        # buildozer -v android release
-
-    - name: Convert AAB to APK (fallback)
-      if: steps.build-android.outputs.BUILD_APK_FAILED == 'true'
-      run: |
-        echo "=== Trying to convert AAB → APK ==="
-        AAB=$(find . -name "*.aab" | head -1)
-        if [ -z "$AAB" ]; then
-          echo "❌ No AAB found either"
-          exit 1
-        fi
-        # 下载 bundletool
-        BUNDLETOOL="bundletool-all.jar"
-        if [ ! -f "$BUNDLETOOL" ]; then
-          wget -q "https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar" -O "$BUNDLETOOL"
-        fi
-        # 生成 universal APK
-        java -jar "$BUNDLETOOL" build-apks \
-          --mode=universal \
-          --bundle="$AAB" \
-          --output="converted.apks" \
-          --ks="$PWD/com.lanplay.monitor.keystore" \
-          --ks-key-alias="com.lanplay.monitor" \
-          --ks-pass=pass:android \
-          --key-pass=pass:android 2>&1
-        # 解压 universal APK
-        mkdir -p converted
-        unzip -o converted.apks -d converted/
-        find converted -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
-        echo "=== Converted APKs ==="
-        find converted -name "*.apk" -exec ls -lh {} \;
-
-    - name: Final check & upload prep
-      id: final-check
-      run: |
-        echo "=== Final APK check ==="
-        find . -name "*.apk" 2>/dev/null | while read f; do
-          echo "✅ $f ($(du -h "$f" | cut -f1))"
-        done
-        if ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-        else
-          echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Upload APK artifact
-      if: steps.final-check.outputs.BUILD_FINAL_SUCCESS == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: kivy-app-build
-        path: bin/*.apk
-        retention-days: 30
-
-    - name: Upload signing key (if newly created)
-      if: steps.generate_key.outputs.KEY_CREATED == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-keystore
-        path: com.lanplay.monitor.keystore
-        retention-days: 1
-
-    - name: Upload build logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          buildozer.log
-          clean.log
-        retention-days: 7
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            buildozer.log
+            .buildozer/android/platform/build-*/**/buildozer.log
+          retention-days: 3

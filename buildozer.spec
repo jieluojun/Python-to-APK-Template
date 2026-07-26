@@ -1,103 +1,53 @@
 [app]
+#标题允许中文 title language is not limited
+title = LanPlayMonitor
+package.name = monitor
 
-# ===== 基本信息 =====
-title = LanPlay Monitor
-package.name = lanplaymonitor
-package.domain = org.lanplay
+#release模式不能用org.test 'org.test' can't be used in release mode
+package.domain = com.lanplay
+#工作目录 working directory
 source.dir = .
-source.include_exts = py,kv,html,json,css,js,md,txt
-entrypoint = main.py
-version = 1.0.0
-
-# ===== Python 依赖 =====
-requirements = python3,kivy,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi
-
-# ===== 图标 =====
+#需要打包的文件类型 file types to be packed
+source.include_exts = py,png,jpg,kv,atlas
+#打包image目录下的文件 Pack files in the image directory
+#source.include_patterns = image/*
+version = 0.0.1
+#依赖库,后二为打包需要 The last two are needed for packaging
+requirements = python3,kivy,kivymd,libiconv,libffi
 icon.filename = icon.png
-presplash.filename = presplash.png
-presplash.color = #1a1a2e
-android.icon_foreground_filename = icon_foreground.png
-android.icon_background_filename = icon_background.png
-android.icon_background_color = #1a1a2e
-
-# ===== 竖屏 =====
-orientation = portrait
+#presplash.filename = presplash.png
 fullscreen = 0
+orientation = portrait
+#主程序 Main,what can I say.Mamba out
+entrypoint = main.py
 
-# ===== 权限 =====
-android.permissions = INTERNET
-android.meta_data = android:usesCleartextTraffic="true"
-android.allow_backup = 0
-
-# ===== Android 构建环境 =====
+#这些不要改 Don't change these
 android.accept_sdk_license = True
 android.allow_api_min = 21
-android.api = 34
+android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.ndk_api = 21
-
-# ===== Gradle =====
+exclude_patterns = **/test/*, **/tests/*
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
 android.gradle_plugin = 7.4.2
+android.sdk = 33
+android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
+#打包需要网络权限 Network permission is required for packaging
+android.permissions = INTERNET
 
-# ===== 输出 APK（不是 AAB）=====
+#以下为release模式需要 Following is required for release mode
+
+#强制构建APK而不是AAB,但没用 Why does it build .aab instead of .apk?
 android.aab = False
-android.release_artifact = apk
 
-# ===== p4a 配置 =====
-p4a.branch = master
-p4a.archs = arm64-v8a,armeabi-v7a
-
-# ===== 体积优化 =====
-android.exclude_pythonlib =
-    idlelib,
-    lib2to3,
-    test,
-    tests,
-    tkinter,
-    turtle,
-    sqlite3,
-    pydoc_data,
-    ensurepip,
-    venv,
-    curses,
-    email,
-    mimetypes,
-    xmlrpc,
-    distutils,
-    configparser,
-    argparse,
-    gettext,
-    locale,
-    optparse,
-    pdb,
-    profile,
-    pstats,
-    timeit,
-    trace,
-    tracemalloc,
-    typing,
-    unittest,
-    zipapp,
-    compileall,
-    dis,
-    inspect,
-    pickletools
-
-exclude_patterns =
-    **/test/*,
-    **/tests/*,
-    **/*.pyc,
-    **/__pycache__/*,
-    **/*.md,
-    **/*.txt,
-    **/docs/*
-
-android.debuggable = False
+#签名配置 signature configuration
+#android.keystore = /home/runner/work/RepositoryName/AndAgain/DomainName.PackageName.keystore
+#android.keystore_storepass = android
+#android.keystore_keypass = android
+#android.keystore_alias = DomainName.PackageName
 
 [buildozer]
 log_level = 2

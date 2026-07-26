@@ -19,7 +19,7 @@ requirements = python3,kivy,kivymd,libiconv,libffi
 #fullscreen = 0
 #orientation = portrait
 #主程序 Main,what can I say.Mamba out
-entrypoint = main.py
+entrypoint = lan-play-monitor.py
 
 #这些不要改 Don't change these
 android.accept_sdk_license = True

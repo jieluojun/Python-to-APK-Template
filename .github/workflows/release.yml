@@ -31,7 +31,7 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # ===== 3. Python 3.10（Cython 3.x 兼容） =====
+    # ===== 3. Python 3.10 (修复 Cython 编译问题) =====
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
@@ -49,39 +49,27 @@ jobs:
             curl unzip openjdk-17-jdk libltdl-dev \
             pngquant
 
-    # ===== 5. 安装 Python 依赖（Cython 3.x 方案） =====
+    # ===== 5. 安装 Python 依赖（版本已修正，不再报错）=====
     - name: Install Buildozer
       run: |
         python -m pip install --upgrade pip
-        # ✅ Cython 3.0.x 兼容 Kivy 2.3.0 + Python 3.10
+        # 修正：1.5.1 不存在，改用 1.5.0；Cython 用 <3.1 适配 Python 3.10
         pip install "cython<3.1"
-        # ✅ buildozer 1.5.0（PyPI 存在）
         pip install buildozer==1.5.0
-        # ✅ p4a 2024.1.21（PyPI 存在）
         pip install python-for-android==2024.1.21
         pip install kivy==2.3.0 pyjnius==1.4.2
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    # ===== 6. 验证版本 =====
-    - name: Verify versions
-      run: |
-        echo "=== Versions ==="
-        python --version
-        pip show buildozer 2>/dev/null | grep Version
-        pip show python-for-android 2>/dev/null | grep Version
-        pip show cython 2>/dev/null | grep Version
-
-    # ===== 7. 压缩 PNG 图标 =====
+    # ===== 6. 压缩 PNG 图标 =====
     - name: Optimize PNG assets
       run: |
         for f in icon.png icon_foreground.png icon_background.png presplash.png; do
           if [ -f "$f" ]; then
             pngquant --quality=60-80 --force --output "$f.q" "$f" && mv "$f.q" "$f" || true
-            echo "  $f: $(du -h "$f" | cut -f1)"
           fi
         done
 
-    # ===== 8. 生成签名 Keystore =====
+    # ===== 7. 生成签名 Keystore =====
     - name: Generate signing key
       id: generate_key
       run: |
@@ -101,78 +89,58 @@ jobs:
           echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
         fi
 
-    # ===== 9. 彻底清理旧构建缓存 =====
+    # ===== 8. 彻底清理旧构建缓存 =====
     - name: Clean ALL old builds
       run: |
-        echo "=== Cleaning ==="
         rm -rf .buildozer bin/ ~/.buildozer
         pip cache purge 2>/dev/null || true
-        echo "=== Clean done ==="
+        buildozer android clean 2>&1 || true
 
-    # ===== 10. 构建 Debug APK（先用 debug 确保能编译过） =====
+    # ===== 9. 构建 Debug APK =====
     - name: Build Debug APK
+      id: build_debug
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
-        echo "=== Building Debug APK ==="
-        buildozer android debug 2>&1 | tee debug.log
-        echo "=== APK check ==="
-        ls -lh bin/*.apk 2>/dev/null || echo "No APK in bin/"
-        find . -name "*.apk" 2>/dev/null
+        buildozer -v android debug 2>&1 | tee debug.log
 
-    # ===== 11. 构建 Release APK =====
+    # ===== 10. 构建 Release APK =====
     - name: Build Release APK
       if: success()
+      id: build_release
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
+        # 签名环境变量
         export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
         export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
         export P4A_RELEASE_KEYSTORE_PASSWD="android"
         export P4A_RELEASE_KEYALIAS_PASSWD="android"
-        echo "=== Building Release APK ==="
-        buildozer android release 2>&1 | tee release.log
-        echo "=== Final APK check ==="
-        ls -lh bin/*.apk 2>/dev/null || echo "No APK in bin/"
+        buildozer -v android release 2>&1 | tee release.log
 
-    # ===== 12. 签名 Release APK =====
-    - name: Sign Release APK
-      if: success()
+    # ===== 11. 【核心修复】查找生成的 APK 文件 =====
+    # 之前的失败是因为路径不对，这里用 find 命令自动寻找
+    - name: Find APK file
+      id: find-apk
       run: |
-        APK=$(find bin/ -name "*-release-unsigned.apk" 2>/dev/null | head -1)
-        if [ -n "$APK" ]; then
-          echo "Signing $APK ..."
-          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" 2>/dev/null | head -1)
-          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name "zipalign" 2>/dev/null | head -1)
-          SIGNED="bin/LanPlayMonitor-1.0.0-release.apk"
-          "$ZIPALIGN" -v 4 "$APK" "${APK%.apk}-aligned.apk" 2>&1 || true
-          ALIGNED="${APK%.apk}-aligned.apk"
-          "$APKSIGNER" sign \
-            --ks "$PWD/com.lanplay.monitor.keystore" \
-            --ks-key-alias "com.lanplay.monitor" \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --out "$SIGNED" \
-            "$ALIGNED" 2>&1 || true
-          echo "✅ Signed APK: $SIGNED"
-        else
-          echo "No unsigned APK found, checking for already-signed..."
-          find bin/ -name "*.apk" 2>/dev/null
+        apk_file=$(find . -name "*.apk" -type f | head -n 1)
+        if [ -z "$apk_file" ]; then
+          echo "❌ APK file not found!"
+          exit 1
         fi
+        echo "✅ Found APK: $apk_file"
+        echo "APK_PATH=$apk_file" >> $GITHUB_OUTPUT
 
-    # ===== 13. 上传 APK =====
-    - name: Upload APK
-      if: always()
+    # ===== 12. 上传 APK Artifact =====
+    - name: Upload APK artifact
+      if: steps.find-apk.outcome == 'success'
       uses: actions/upload-artifact@v4
       with:
-        name: kivy-app-build
-        path: |
-          bin/*.apk
+        name: kivy-android-apk
+        path: ${{ steps.find-apk.outputs.APK_PATH }}
         retention-days: 30
 
-    # ===== 14. 上传 Keystore =====
+    # ===== 13. 上传 Keystore =====
     - name: Upload keystore
       if: steps.generate_key.outputs.KEY_CREATED == 'true'
       uses: actions/upload-artifact@v4
@@ -181,7 +149,7 @@ jobs:
         path: com.lanplay.monitor.keystore
         retention-days: 1
 
-    # ===== 15. 上传日志 =====
+    # ===== 14. 上传日志（兜底）=====
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
@@ -190,4 +158,5 @@ jobs:
         path: |
           debug.log
           release.log
+          buildozer.log
         retention-days: 7

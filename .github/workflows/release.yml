@@ -85,57 +85,12 @@ jobs:
 
     - name: Build APK (force apk format)
       run: |
-        export PATH="$HOME/.local/bin:$PATH"
-
-        echo "=== Environment ==="
-        java -version 2>&1
-        python --version
-        buildozer --version 2>&1 || true
-
-        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
-
-        # p4a 签名环境变量
-        export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
-        export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
-        export P4A_RELEASE_KEYSTORE_PASSWD="android"
-        export P4A_RELEASE_KEYALIAS_PASSWD="android"
-
-        # 清理
-        buildozer android clean 2>&1 | tee clean.log || true
-
-        echo "=== Building APK (NOT AAB) ==="
-        # 关键: 用 `android apk` 而非 `android release`
-        # `android release` 在某些 p4a 版本会输出 AAB
-        # `android apk` 明确指定输出 APK 格式
-        buildozer -v android apk 2>&1 | tee buildozer.log
-        BUILD_EXIT_CODE=${PIPESTATUS[0]}
-        echo "Build exit code: $BUILD_EXIT_CODE"
-
-        echo "=== Looking for *.apk ==="
-        find . -name "*.apk" 2>/dev/null | while read f; do
-          echo "✅ Found APK: $f ($(du -h "$f" | cut -f1))"
-        done
-
-        echo "=== Looking for *.aab (should be empty) ==="
-        find . -name "*.aab" 2>/dev/null | while read f; do
-          echo "⚠️ Found AAB: $f ($(du -h "$f" | cut -f1))"
-        done
-
-        # 收集 APK 到 bin/
-        mkdir -p bin
-        find . -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
-
-        # 如果 bin/ 里只有 aab 没有 apk, 尝试从 aab 转换
-        if ! ls bin/*.apk 1>/dev/null 2>&1; then
-          echo "⚠️ No APK found in bin/, checking if we need to use bundletool..."
-          echo "BUILD_APK_FAILED=true" >> $GITHUB_OUTPUT
-        else
-          echo "BUILD_APK_FAILED=false" >> $GITHUB_OUTPUT
-        fi
-
-        echo "=== Final bin/ contents ==="
-        ls -lh bin/ 2>/dev/null
+        # 强制清理旧文件
+        rm -rf bin/*.apk bin/*.aab
+        # 强制构建 APK
+        buildozer -v android apk
+        # 检查是否生成
+        ls -l bin/*.apk
 
     - name: Sign APK with keystore
       if: steps.build-android.outputs.BUILD_APK_FAILED != 'true'

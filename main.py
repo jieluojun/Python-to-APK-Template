@@ -1,19 +1,29 @@
+# main.py
+from kivy.app import App
 from kivy.uix.webview import WebView
-from kivy.base import runTouchApp
+from kivy.clock import Clock
+from kivy.utils import platform
 import time
-import urllib.request
+import threading
 
-def is_server_ready():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:5000", timeout=1)
-        return True
-    except:
-        return False
+# ✅ 导入你的服务器
+from lan_play_monitor import start_server_in_thread
 
-# 等待最多 5 秒
-for i in range(10):
-    if is_server_ready():
-        break
-    time.sleep(0.5)
 
-runTouchApp(WebView(url="http://127.0.0.1:5000"))
+class LanPlayApp(App):
+    def build(self):
+        # 先启动本地 HTTP 服务器
+        start_server_in_thread()
+
+        self.webview = WebView(url="")
+
+        # Android 上必须延迟加载，否则会闪退
+        Clock.schedule_once(self.load_page, 1.5)
+        return self.webview
+
+    def load_page(self, dt):
+        self.webview.url = "http://127.0.0.1:5000"
+
+
+if __name__ == "__main__":
+    LanPlayApp().run()

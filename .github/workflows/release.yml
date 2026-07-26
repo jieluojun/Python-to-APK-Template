@@ -49,18 +49,28 @@ jobs:
             curl unzip openjdk-17-jdk libltdl-dev \
             pngquant
 
-    # ===== 5. 安装 Python 依赖（固定版本，防止 AAB 冲突） =====
+    # ===== 5. 安装 Python 依赖（版本已修正） =====
     - name: Install Buildozer
       run: |
         python -m pip install --upgrade pip
-        # 固定兼容版本组合（经过验证可用）
+        # ✅ buildozer 1.5.0（PyPI 存在，1.5.1 不存在！）
         pip install cython==0.29.33
-        pip install buildozer==1.5.1
-        pip install python-for-android==2024.01.21
+        pip install buildozer==1.5.0
+        # ✅ p4a 2024.1.21（正确写法，点不是斜杠）
+        pip install python-for-android==2024.1.21
         pip install kivy==2.3.0 pyjnius==1.4.2
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    # ===== 6. 压缩 PNG 图标 =====
+    # ===== 6. 验证版本 =====
+    - name: Verify versions
+      run: |
+        echo "=== Versions ==="
+        python --version
+        buildozer --version 2>&1 || true
+        pip show buildozer 2>/dev/null | grep Version
+        pip show python-for-android 2>/dev/null | grep Version
+
+    # ===== 7. 压缩 PNG 图标 =====
     - name: Optimize PNG assets
       run: |
         for f in icon.png icon_foreground.png icon_background.png presplash.png; do
@@ -70,7 +80,7 @@ jobs:
           fi
         done
 
-    # ===== 7. 生成签名 Keystore =====
+    # ===== 8. 生成签名 Keystore =====
     - name: Generate signing key
       id: generate_key
       run: |
@@ -90,27 +100,16 @@ jobs:
           echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
         fi
 
-    # ===== 8. 彻底清理旧构建缓存（关键！） =====
+    # ===== 9. 彻底清理旧构建缓存 =====
     - name: Clean ALL old builds
       run: |
         echo "=== Cleaning everything ==="
         rm -rf .buildozer
         rm -rf bin/
         rm -rf ~/.buildozer
-        # 清理 pip 缓存
         pip cache purge 2>/dev/null || true
-        # 清理 buildozer 缓存目录
         buildozer android clean 2>&1 || true
         echo "=== Clean done ==="
-
-    # ===== 9. 验证版本 =====
-    - name: Verify versions
-      run: |
-        echo "=== Versions ==="
-        python --version
-        buildozer --version 2>&1 || true
-        pip show buildozer 2>/dev/null | grep Version
-        pip show python-for-android 2>/dev/null | grep Version
 
     # ===== 10. 构建 Debug APK =====
     - name: Build Debug APK
@@ -120,7 +119,6 @@ jobs:
         export USE_COLORS=0
 
         echo "=== Building Debug APK ==="
-        # 用 --no-aab 参数强制不打 AAB
         buildozer android debug 2>&1 | tee debug.log
 
         echo "=== Checking output ==="
@@ -144,8 +142,8 @@ jobs:
         export P4A_RELEASE_KEYALIAS_PASSWD="android"
 
         echo "=== Building Release APK ==="
-        # 明确指定 apk 命令（不是 release）
-        buildozer android apk 2>&1 | tee release.log
+        # ✅ release 命令 + spec 里 android.release_artifact=apk 控制输出
+        buildozer android release 2>&1 | tee release.log
 
         echo "=== Final APK check ==="
         find . -name "*.apk" 2>/dev/null | while read f; do

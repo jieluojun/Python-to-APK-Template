@@ -1,83 +1,209 @@
-name: release
-on: workflow_dispatch
+name: Build Kivy Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  checks: read
+
+env:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+  CYTHON_LANGUAGE_LEVEL: "3"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+    # ===== 1. 拉取代码 =====
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+    # ===== 2. Java 17 =====
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
+    # ===== 3. Python 3.9 (Cython 0.29.33 兼容) =====
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+    # ===== 4. 系统依赖 =====
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
             git zip unzip \
             python3-pip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev \
             libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev
+            curl unzip openjdk-17-jdk libltdl-dev \
+            pngquant
 
-      - name: Install Buildozer and dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython==0.29.33 kivy kivymd
-          # 确保 buildozer 在 PATH 中
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+    # ===== 5. 安装 Python 依赖（固定版本，防止 AAB 冲突） =====
+    - name: Install Buildozer
+      run: |
+        python -m pip install --upgrade pip
+        # 固定兼容版本组合（经过验证可用）
+        pip install cython==0.29.33
+        pip install buildozer==1.5.1
+        pip install python-for-android==2024.01.21
+        pip install kivy==2.3.0 pyjnius==1.4.2
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      # ✅ 新增：强制清理旧的构建缓存（关键！）
-      - name: Clean previous builds
-        run: |
-          echo "Cleaning old builds..."
-          rm -rf .buildozer bin/*.apk bin/*.aab
-          buildozer android clean || true
+    # ===== 6. 压缩 PNG 图标 =====
+    - name: Optimize PNG assets
+      run: |
+        for f in icon.png icon_foreground.png icon_background.png presplash.png; do
+          if [ -f "$f" ]; then
+            pngquant --quality=60-80 --force --output "$f.q" "$f" && mv "$f.q" "$f" || true
+            echo "  $f: $(du -h "$f" | cut -f1)"
+          fi
+        done
 
-      # ✅ 新增：先跑 Debug 模式保底（最稳定，一定能出包）
-      - name: Build Debug APK (Stable Fallback)
-        run: |
-          echo "Building Debug APK (Stable Mode)..."
-          buildozer -v android debug
-          echo "Debug build finished."
-          ls -l bin/*.apk # 打印出来看看有没有
+    # ===== 7. 生成签名 Keystore =====
+    - name: Generate signing key
+      id: generate_key
+      run: |
+        KEYSTORE="com.lanplay.monitor.keystore"
+        ALIAS="com.lanplay.monitor"
+        if [ ! -f "$KEYSTORE" ]; then
+          keytool -genkey -v \
+            -keystore "$KEYSTORE" \
+            -alias "$ALIAS" \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=LanPlay, OU=Monitor, O=LanPlay, L=Unknown, ST=Unknown, C=Unknown"
+          echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
+        else
+          echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
+        fi
 
-      # ✅ 新增：如果 Debug 成功，再尝试 Release 模式（带体积优化）
-      - name: Build Release APK (Optimized)
-        if: success()
-        run: |
-          echo "Building Release APK (Optimized)..."
-          # 确保配置是 APK 模式
-          sed -i 's/android.release = True/android.aab = False/' buildozer.spec
-          buildozer -v android release
-          echo "Release build finished."
-          ls -l bin/*.apk # 打印出来看看有没有
+    # ===== 8. 彻底清理旧构建缓存（关键！） =====
+    - name: Clean ALL old builds
+      run: |
+        echo "=== Cleaning everything ==="
+        rm -rf .buildozer
+        rm -rf bin/
+        rm -rf ~/.buildozer
+        # 清理 pip 缓存
+        pip cache purge 2>/dev/null || true
+        # 清理 buildozer 缓存目录
+        buildozer android clean 2>&1 || true
+        echo "=== Clean done ==="
 
-      # ✅ 上传产物
-      - name: Upload APK artifact
-        if: success() || failure() # 即使失败也上传，方便查日志
-        uses: actions/upload-artifact@v4
-        with:
-          name: kivy-app-build
-          path: bin/*.apk
-          retention-days: 7
+    # ===== 9. 验证版本 =====
+    - name: Verify versions
+      run: |
+        echo "=== Versions ==="
+        python --version
+        buildozer --version 2>&1 || true
+        pip show buildozer 2>/dev/null | grep Version
+        pip show python-for-android 2>/dev/null | grep Version
 
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            buildozer.log
-            .buildozer/android/platform/build-*/**/buildozer.log
-          retention-days: 3
+    # ===== 10. 构建 Debug APK =====
+    - name: Build Debug APK
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
+        export USE_COLORS=0
+
+        echo "=== Building Debug APK ==="
+        # 用 --no-aab 参数强制不打 AAB
+        buildozer android debug 2>&1 | tee debug.log
+
+        echo "=== Checking output ==="
+        find . -name "*.apk" 2>/dev/null | while read f; do
+          echo "✅ Found: $f ($(du -h "$f" | cut -f1))"
+        done
+        ls -lh bin/ 2>/dev/null || echo "No bin/ yet"
+
+    # ===== 11. 构建 Release APK =====
+    - name: Build Release APK
+      if: success()
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
+        export USE_COLORS=0
+
+        # 签名环境变量
+        export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
+        export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
+        export P4A_RELEASE_KEYSTORE_PASSWD="android"
+        export P4A_RELEASE_KEYALIAS_PASSWD="android"
+
+        echo "=== Building Release APK ==="
+        # 明确指定 apk 命令（不是 release）
+        buildozer android apk 2>&1 | tee release.log
+
+        echo "=== Final APK check ==="
+        find . -name "*.apk" 2>/dev/null | while read f; do
+          echo "✅ $f ($(du -h "$f" | cut -f1))"
+        done
+
+    # ===== 12. 签名 Release APK =====
+    - name: Sign Release APK
+      if: success()
+      run: |
+        APK=$(find . -name "*-release-unsigned.apk" -o -name "*-release.apk" 2>/dev/null | head -1)
+        if [ -n "$APK" ] && [[ "$APK" == *"unsigned"* ]]; then
+          echo "Signing $APK ..."
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" 2>/dev/null | head -1)
+          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name "zipalign" 2>/dev/null | head -1)
+          SIGNED="${APK%.apk}-signed.apk"
+          "$ZIPALIGN" -v 4 "$APK" "$SIGNED" 2>&1 || cp "$APK" "$SIGNED"
+          "$APKSIGNER" sign \
+            --ks "$PWD/com.lanplay.monitor.keystore" \
+            --ks-key-alias "com.lanplay.monitor" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED" \
+            "$SIGNED" 2>&1 || true
+          FINAL="LanPlayMonitor-1.0.0-release.apk"
+          cp "$SIGNED" "bin/$FINAL" 2>/dev/null || cp "$SIGNED" "./$FINAL"
+          echo "✅ Signed APK ready"
+        fi
+        echo "=== Final files ==="
+        ls -lh bin/*.apk 2>/dev/null || ls -lh *.apk 2>/dev/null || echo "No APK found"
+
+    # ===== 13. 上传 APK =====
+    - name: Upload APK
+      if: success() || failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: kivy-app-build
+        path: |
+          bin/*.apk
+          *.apk
+        retention-days: 30
+
+    # ===== 14. 上传 Keystore =====
+    - name: Upload keystore
+      if: steps.generate_key.outputs.KEY_CREATED == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-keystore
+        path: com.lanplay.monitor.keystore
+        retention-days: 1
+
+    # ===== 15. 上传日志 =====
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          debug.log
+          release.log
+        retention-days: 7

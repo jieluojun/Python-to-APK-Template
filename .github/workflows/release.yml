@@ -11,11 +11,12 @@ env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+  USE_CCACHE: 1
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64 -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # ✅ 比 ubuntu-latest 更轻量、更快
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout code
@@ -32,7 +33,6 @@ jobs:
       with:
         python-version: '3.10'
 
-    # ✅ 缓存 pip 下载的包，第二次构建快 2-3 分钟
     - name: Cache pip
       uses: actions/cache@v4
       with:
@@ -41,7 +41,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    # ✅ 缓存 Buildozer 下载的 SDK/NDK/Gradle（最大加速点）
     - name: Cache Buildozer downloads
       uses: actions/cache@v4
       with:
@@ -62,7 +61,7 @@ jobs:
           pkg-config zlib1g-dev \
           libncurses5-dev libncursesw5-dev \
           cmake libffi-dev libssl-dev \
-          python3-pip curl \
+          python3-pip curl ccache \
           libcairo2-dev \
           libgirepository1.0-dev \
           libsdl2-dev \
@@ -76,9 +75,7 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip wheel setuptools
-        pip install Cython==0.29.33 buildozer python-for-android
-        pip install kivy[base]==2.3.0
-        pip install https://github.com/kivymd/KivyMD/archive/master.zip
+        pip install -r requirements.txt
 
     - name: Create signing keystore (if not exists)
       run: |
@@ -103,11 +100,14 @@ jobs:
       id: apk
       run: |
         mkdir -p output
-        APK=$(find .buildozer -name "*-release.apk" | head -n 1)
+        echo "=== Searching for APK ==="
+        APK=$(find .buildozer -name "*.apk" 2>/dev/null | head -n 1)
         if [ -z "$APK" ]; then
-          echo "❌ APK not found, checking bin/..."
-          ls -la bin/ 2>/dev/null || true
-          ls -la .buildozer/android/platform/build-*/dists/*/ 2>/dev/null || true
+          echo "❌ APK not found, dumping build dir:"
+          find .buildozer -type f -name "*.apk" -o -name "*.aab" 2>/dev/null
+          ls -laR .buildozer/android/platform/build-*/dists/ 2>/dev/null | head -50
+          echo "=== Last 50 lines of buildozer.log ==="
+          tail -50 buildozer.log 2>/dev/null || true
           exit 1
         fi
         cp "$APK" output/LanPlayMonitor-release.apk

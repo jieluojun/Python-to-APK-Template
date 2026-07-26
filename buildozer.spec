@@ -1,18 +1,18 @@
 [app]
-title = 应用名
-package.name = 包名
-package.domain = org.test#域名
-source.dir = .#根目录下工作
-source.include_exts = py,png,jpg,kv,atlas,ttf#打包文件
-source.include_patterns = image/*#文件夹内文件
-version = 114.514#版本
-#依赖
+title = LanPlayMonitor
+package.name = monitor
+package.domain = com.lanplay
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_patterns = image/*
+version = 1.0.0
+# 依赖
 requirements = python3,kivy,kivymd,libiconv,libffi
-#icon.filename = 应用图标
-#presplash.filename = 加载界面图片
-#fullscreen = 0
-#orientation = portrait
-entrypoint = main.py#主程序
+icon.filename = icon.png
+# presplash.filename = presplash.png # 启动界面图片
+fullscreen = 0 # 0=不启用全屏，1=启用全屏
+orientation = portrait # 应用竖屏
+entrypoint = main.py
 android.accept_sdk_license = True
 android.allow_api_min = 21
 android.api = 33
@@ -26,7 +26,14 @@ android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
-android.permissions = INTERNET#构筑需要网络权限
+android.permissions = INTERNET
+# 强制构建APK，然而并没有用
+android.aab = False
+# 签名配置
+android.keystore = /home/runner/work/a/b/com.lanplay.monitor.keystore
+android.keystore_storepass = android
+android.keystore_keypass = android
+android.keystore_alias = com.lanplay.monitor
 
 [buildozer]
 log_level = 2

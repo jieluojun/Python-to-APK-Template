@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 LanPlay Monitor - Android WebView Shell
-启动 server.py（你的 Flask 服务）+ 显示 WebView
-⚠️ 不修改 server.py，直接当子进程运行
+启动 server.py（子进程）+ 显示 WebView
+⚠️ 不修改 server.py，原样启动
 """
 import os
 import sys
@@ -10,10 +10,10 @@ import time
 import subprocess
 import threading
 
-# ===== 启动 server.py（你的监控服务）=====
+# ===== 启动 server.py =====
 def start_server():
     """把 server.py 作为子进程启动，完全不动它的代码"""
-    time.sleep(2)  # 等 Android 环境就绪
+    time.sleep(2)
 
     server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
@@ -23,8 +23,6 @@ def start_server():
 
     print(f"🚀 Starting server.py: {server_path}")
 
-    # 直接运行 python server.py
-    # 这样 server.py 里写的 app.run() 或任何启动方式都能正常工作
     try:
         proc = subprocess.Popen(
             [sys.executable, server_path],
@@ -34,7 +32,6 @@ def start_server():
         )
         print(f"✅ server.py PID: {proc.pid}")
 
-        # 读取输出（调试用）
         def read_output():
             for line in proc.stdout:
                 print(f"[server] {line.decode('utf-8', errors='replace').strip()}")
@@ -46,7 +43,7 @@ def start_server():
 
     except Exception as e:
         print(f"❌ Failed to start server.py: {e}")
-        # 如果子进程方式失败，尝试直接 import 运行
+        # 兜底：尝试 import 方式
         try:
             import server
             if hasattr(server, 'app'):
@@ -78,10 +75,7 @@ def start_webview():
         settings.setAllowFileAccess(True)
         settings.setAllowContentAccess(True)
 
-        # 禁止跳浏览器
         webview.setWebViewClient(WebViewClient())
-
-        # 加载本地 Flask 服务
         webview.loadUrl("http://127.0.0.1:5000")
 
         layout = LinearLayout(activity)
@@ -95,9 +89,6 @@ def start_webview():
 
 # ===== 入口 =====
 if __name__ == "__main__":
-    # 后台线程启动 server.py（原样不动）
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
-
-    # 主线程启动 WebView
     start_webview()

@@ -10,7 +10,6 @@ entrypoint = main.py
 version = 1.0.0
 
 # ===== Python 依赖 =====
-# Kivy（提供稳定构建环境）+ Flask（你的监控服务）
 requirements = python3,kivy,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi
 
 # ===== 图标 =====
@@ -45,7 +44,7 @@ p4a.gradle_dependencies = gradle:7.6.4
 p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
-# ===== 输出 APK（不是 AAB！）=====
+# ===== 输出 APK（不是 AAB）=====
 android.aab = False
 android.release_artifact = apk
 
@@ -99,12 +98,6 @@ exclude_patterns =
     **/docs/*
 
 android.debuggable = False
-
-# ===== 签名（由 CI 注入）=====
-# android.keystore = com.lanplay.monitor.keystore
-# android.keystore_storepass = android
-# android.keystore_keypass = android
-# android.keystore_alias = com.lanplay.monitor
 
 [buildozer]
 log_level = 2

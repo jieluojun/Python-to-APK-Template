@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Kivy Android APK In Release Mode
 
 on:
   workflow_dispatch:
@@ -47,8 +47,18 @@ jobs:
     - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython==0.29.33 kivy kivymd
+        pip install buildozer cython==0.29.33
+        pip install kivy==2.3.0
+        pip install kivymd==1.1.1
         pip install python-for-android
+
+    - name: Debug - List repo contents
+      run: |
+        echo "=== Repository root ==="
+        ls -la
+        echo ""
+        echo "=== Check buildozer.spec exists ==="
+        cat buildozer.spec | head -20
 
     - name: Generate signing key (if not exists)
       id: generate_key
@@ -74,40 +84,67 @@ jobs:
     - name: Build APK with Buildozer (Release)
       run: |
         export PATH="$HOME/.local/bin:$PATH"
-        echo "=== Environment Check ==="
-        java -version
-        python --version
-        buildozer --version
 
-        export BUILDODER_ALLOW_PLATFORM_EXEC=1
+        echo "=== Environment Check ==="
+        java -version 2>&1
+        python --version
+        which buildozer
+        buildozer --version 2>&1 || true
+
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
 
-        # p4a 签名环境变量(必须与上面 keytool 的 alias/password 一致)
+        # p4a 签名环境变量
         export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
         export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
         export P4A_RELEASE_KEYSTORE_PASSWD="android"
         export P4A_RELEASE_KEYALIAS_PASSWD="android"
 
-        # 清理旧构建(避免缓存导致的奇怪问题)
-        buildozer -v android clean 2>&1 | tee clean.log || true
+        # 清理旧构建
+        buildozer android clean 2>&1 | tee clean.log || true
+
+        echo "=== Starting release build ==="
         # 正式打包 release APK
         buildozer -v android release 2>&1 | tee buildozer.log
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
+        echo "Build exit code: $BUILD_EXIT_CODE"
 
-        # 复制产物到根目录
-        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
-        find . -name "*.aab" -exec cp {} ./ \; 2>/dev/null || true
+        echo "=== Searching for APK/AAB recursively ==="
+        find . -name "*.apk" -o -name "*.aab" 2>/dev/null | while read f; do
+          echo "Found: $f ($(du -h "$f" | cut -f1))"
+        done
+
+        # 复制到根目录和 bin/
+        mkdir -p bin
+        find . -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
+        find . -name "*.aab" -exec cp -v {} ./bin/ \; 2>/dev/null || true
+        find . -name "*.apk" -exec cp -v {} ./ \; 2>/dev/null || true
+        find . -name "*.aab" -exec cp -v {} ./ \; 2>/dev/null || true
+
+        echo "=== bin/ contents ==="
+        ls -la bin/ 2>/dev/null || echo "bin/ not found"
 
     - name: Check if APK/AAB was built
       id: check-build
       run: |
-        if ls *.apk 1>/dev/null 2>&1 || ls *.aab 1>/dev/null 2>&1; then
+        echo "=== Checking for build artifacts ==="
+        ls -la *.apk *.aab bin/ 2>/dev/null || true
+
+        if ls bin/*.apk 1>/dev/null 2>&1 || ls bin/*.aab 1>/dev/null 2>&1; then
           echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "=== Built files ==="
-          ls -la *.apk *.aab 2>/dev/null || true
+          echo "=== Built files in bin/ ==="
+          ls -la bin/
+        elif ls *.apk 1>/dev/null 2>&1 || ls *.aab 1>/dev/null 2>&1; then
+          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
+          echo "=== Built files in root ==="
+          ls -la *.apk *.aab
         else
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "No APK/AAB found, listing build dir:"
-          find .buildozer -name "*.apk" -o -name "*.aab" -type f 2>/dev/null | head -20
+          echo "❌ No APK/AAB found!"
+          echo "=== Full .buildozer tree (last 30 lines) ==="
+          find .buildozer -type f 2>/dev/null | tail -30 || true
+          echo "=== buildozer.log tail ==="
+          tail -50 buildozer.log 2>/dev/null || echo "No buildozer.log"
         fi
 
     - name: Upload APK/AAB artifact
@@ -115,7 +152,11 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: kivy-app-build
-        path: bin/*
+        path: |
+          bin/*.apk
+          bin/*.aab
+          *.apk
+          *.aab
         retention-days: 30
 
     - name: Upload signing key (if newly created)

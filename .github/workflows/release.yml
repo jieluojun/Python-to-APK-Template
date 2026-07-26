@@ -38,7 +38,7 @@ jobs:
             pkg-config zlib1g-dev libncurses5-dev cmake \
             libffi-dev libssl-dev pngquant
 
-    # ===== 5. 安装 p4a（不用 Buildozer！）=====
+    # ===== 5. 安装 p4a =====
     - name: Install p4a
       run: |
         python -m pip install --upgrade pip
@@ -46,7 +46,22 @@ jobs:
         pip install python-for-android==2024.1.21
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    # ===== 6. 生成签名 Keystore =====
+    # ===== 6. 安装 Android API 34 平台 =====
+    # GitHub Actions 的 Android SDK 默认只装了最新 API
+    # 我们需要用 sdkmanager 安装 API 34 的平台和构建工具
+    - name: Install Android SDK platform
+      run: |
+        export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools"
+        echo "=== Accepting licenses ==="
+        yes | sdkmanager --licenses 2>&1 | tail -5 || true
+        echo "=== Installing Android API 34 ==="
+        sdkmanager "platforms;android-34" 2>&1 | tail -10
+        echo "=== Installing build-tools 34 ==="
+        sdkmanager "build-tools;34.0.0" 2>&1 | tail -10
+        echo "=== SDK contents ==="
+        sdkmanager --list 2>&1 | grep -E "platforms|build-tools" | head -20
+
+    # ===== 7. 生成签名 Keystore =====
     - name: Generate keystore
       id: key
       run: |
@@ -60,28 +75,32 @@ jobs:
           -dname "CN=LanPlay, OU=Monitor, O=LanPlay"
         echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
 
-    # ===== 7. 清理 =====
+    # ===== 8. 清理 =====
     - name: Clean
       run: |
-        rm -rf .buildozer bin/ dist/ *.apk
+        rm -rf .buildozer bin/ dist/ *.apk build.log
         mkdir -p bin
         p4a clean_builds 2>/dev/null || true
         p4a clean_dists 2>/dev/null || true
 
-    # ===== 8. 用 p4a 直接构建 APK =====
+    # ===== 9. 用 p4a 构建 APK（API 34）=====
     - name: Build APK
       id: build_apk
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+        export ANDROIDAPI=34
+        export ANDROIDMINAPI=21
 
         echo "=== p4a version ==="
         p4a --version
 
-        echo "=== Building APK ==="
-        # 直接用 p4a apk 命令，不通过 buildozer
-        # 这样完全绕过 AAB 检测
+        echo "=== Available APIs ==="
+        p4a --sdk_dir=$ANDROID_SDK_ROOT apk --help 2>&1 | head -5 || true
+
+        echo "=== Building APK with API 34 ==="
         p4a \
           --storage-dir=.buildozer \
+          --sdk_dir=$ANDROID_SDK_ROOT \
           apk \
           --requirements=python3,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi \
           --private=. \
@@ -92,20 +111,19 @@ jobs:
           --permission=INTERNET \
           --window \
           --enable-androidx \
-          --android-api=33 \
+          --android-api=34 \
           --ndk=25b \
           --arch=arm64-v8a \
           --arch=armeabi-v7a \
           2>&1 | tee build.log
 
         echo "=== Looking for APK ==="
-        find .buildozer -name "*.apk" -type f | while read f; do
+        find .buildozer -name "*.apk" -type f 2>/dev/null | while read f; do
           echo "✅ Found: $f ($(du -h "$f" | cut -f1))"
           cp "$f" "bin/$(basename "$f")"
         done
 
-        # 也检查当前目录
-        find . -maxdepth 2 -name "*.apk" -type f | while read f; do
+        find . -maxdepth 3 -name "*.apk" -type f 2>/dev/null | while read f; do
           echo "✅ Found: $f"
           cp "$f" "bin/$(basename "$f")"
         done
@@ -122,7 +140,7 @@ jobs:
         echo "=== bin/ ==="
         ls -lh bin/
 
-    # ===== 9. 签名 APK =====
+    # ===== 10. 签名 APK =====
     - name: Sign APK
       run: |
         APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
@@ -133,9 +151,17 @@ jobs:
 
         echo "Signing: $APK"
 
-        # 找 build-tools
-        SDK="/usr/local/lib/android/sdk"
+        # GitHub Actions 的 Android SDK 路径
+        SDK="$ANDROID_SDK_ROOT"
         BT=$(ls -d $SDK/build-tools/*/ 2>/dev/null | sort | tail -1)
+
+        if [ -z "$BT" ] || [ ! -f "$BT/zipalign" ]; then
+          echo "⚠️ build-tools not found at $SDK, trying /usr/local/lib/android/sdk..."
+          SDK="/usr/local/lib/android/sdk"
+          BT=$(ls -d $SDK/build-tools/*/ 2>/dev/null | sort | tail -1)
+        fi
+
+        echo "Using build-tools: $BT"
 
         if [ -n "$BT" ] && [ -f "$BT/zipalign" ] && [ -f "$BT/apksigner" ]; then
           ALIGNED="bin/LanPlayMonitor-aligned.apk"
@@ -153,7 +179,7 @@ jobs:
           ls -lh bin/
         fi
 
-    # ===== 10. 上传 APK =====
+    # ===== 11. 上传 APK =====
     - name: Upload APK
       if: success()
       uses: actions/upload-artifact@v4
@@ -162,7 +188,7 @@ jobs:
         path: bin/*.apk
         retention-days: 30
 
-    # ===== 11. 上传 Keystore =====
+    # ===== 12. 上传 Keystore =====
     - name: Upload keystore
       if: steps.key.outputs.KEY_CREATED == 'true'
       uses: actions/upload-artifact@v4
@@ -171,7 +197,7 @@ jobs:
         path: com.lanplay.monitor.keystore
         retention-days: 1
 
-    # ===== 12. 上传日志 =====
+    # ===== 13. 上传日志 =====
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4

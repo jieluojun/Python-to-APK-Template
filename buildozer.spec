@@ -6,7 +6,8 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,xml,json,txt
 exclude_patterns = **/test/*, **/tests/*, **/__pycache__/*, **/*.pyc
 version = 0.0.1
-requirements = python3==3.10.16,kivy==2.3.0,kivymd,libiconv,libffi
+# ✅ 不锁 python3 版本，让 p4a 自动匹配 hostpython3
+requirements = python3,kivy==2.3.0,kivymd,libiconv,libffi
 icon.filename = icon.png
 fullscreen = 0
 orientation = portrait
@@ -16,14 +17,14 @@ entrypoint = main.py
 # Android 编译配置
 # ============================================================
 android.accept_sdk_license = True
-android.sdk = 33
+# ✅ 删除 android.sdk（已弃用），只保留 android.api
 android.api = 33
 android.minapi = 21
 android.allow_api_min = 21
 android.ndk = 25b
 android.ndk_api = 21
 
-# ✅ Gradle 7.5 稳定版（CI 友好）
+# Gradle 7.5 + AGP 7.4.2（CI 稳定组合）
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.5-all.zip
 android.gradle_plugin = 7.4.2
 p4a.gradle_dependencies = gradle:7.5
@@ -31,7 +32,7 @@ p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64 --
 
 p4a.bootstrap = sdl2
 
-# ✅ 只打单架构，速度翻倍（v8a 覆盖 95% 设备）
+# 只打 arm64-v8a（覆盖 95% 设备，速度翻倍）
 android.aab = False
 android.archs = arm64-v8a
 

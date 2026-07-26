@@ -17,7 +17,7 @@ env:
 
 jobs:
   build-android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     # ===== 1. 拉取代码 =====
@@ -31,11 +31,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # ===== 3. Python 3.9 (Cython 0.29.33 兼容) =====
-    - name: Set up Python 3.9
+    # ===== 3. Python 3.10（Cython 3.x 兼容） =====
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.10'
 
     # ===== 4. 系统依赖 =====
     - name: Install system dependencies
@@ -49,14 +49,15 @@ jobs:
             curl unzip openjdk-17-jdk libltdl-dev \
             pngquant
 
-    # ===== 5. 安装 Python 依赖（版本已修正） =====
+    # ===== 5. 安装 Python 依赖（Cython 3.x 方案） =====
     - name: Install Buildozer
       run: |
         python -m pip install --upgrade pip
-        # ✅ buildozer 1.5.0（PyPI 存在，1.5.1 不存在！）
-        pip install cython==0.29.33
+        # ✅ Cython 3.0.x 兼容 Kivy 2.3.0 + Python 3.10
+        pip install "cython<3.1"
+        # ✅ buildozer 1.5.0（PyPI 存在）
         pip install buildozer==1.5.0
-        # ✅ p4a 2024.1.21（正确写法，点不是斜杠）
+        # ✅ p4a 2024.1.21（PyPI 存在）
         pip install python-for-android==2024.1.21
         pip install kivy==2.3.0 pyjnius==1.4.2
         echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -66,9 +67,9 @@ jobs:
       run: |
         echo "=== Versions ==="
         python --version
-        buildozer --version 2>&1 || true
         pip show buildozer 2>/dev/null | grep Version
         pip show python-for-android 2>/dev/null | grep Version
+        pip show cython 2>/dev/null | grep Version
 
     # ===== 7. 压缩 PNG 图标 =====
     - name: Optimize PNG assets
@@ -103,29 +104,22 @@ jobs:
     # ===== 9. 彻底清理旧构建缓存 =====
     - name: Clean ALL old builds
       run: |
-        echo "=== Cleaning everything ==="
-        rm -rf .buildozer
-        rm -rf bin/
-        rm -rf ~/.buildozer
+        echo "=== Cleaning ==="
+        rm -rf .buildozer bin/ ~/.buildozer
         pip cache purge 2>/dev/null || true
-        buildozer android clean 2>&1 || true
         echo "=== Clean done ==="
 
-    # ===== 10. 构建 Debug APK =====
+    # ===== 10. 构建 Debug APK（先用 debug 确保能编译过） =====
     - name: Build Debug APK
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
-
         echo "=== Building Debug APK ==="
         buildozer android debug 2>&1 | tee debug.log
-
-        echo "=== Checking output ==="
-        find . -name "*.apk" 2>/dev/null | while read f; do
-          echo "✅ Found: $f ($(du -h "$f" | cut -f1))"
-        done
-        ls -lh bin/ 2>/dev/null || echo "No bin/ yet"
+        echo "=== APK check ==="
+        ls -lh bin/*.apk 2>/dev/null || echo "No APK in bin/"
+        find . -name "*.apk" 2>/dev/null
 
     # ===== 11. 构建 Release APK =====
     - name: Build Release APK
@@ -134,56 +128,48 @@ jobs:
         export PATH="$HOME/.local/bin:$PATH"
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
-
-        # 签名环境变量
         export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
         export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
         export P4A_RELEASE_KEYSTORE_PASSWD="android"
         export P4A_RELEASE_KEYALIAS_PASSWD="android"
-
         echo "=== Building Release APK ==="
-        # ✅ release 命令 + spec 里 android.release_artifact=apk 控制输出
         buildozer android release 2>&1 | tee release.log
-
         echo "=== Final APK check ==="
-        find . -name "*.apk" 2>/dev/null | while read f; do
-          echo "✅ $f ($(du -h "$f" | cut -f1))"
-        done
+        ls -lh bin/*.apk 2>/dev/null || echo "No APK in bin/"
 
     # ===== 12. 签名 Release APK =====
     - name: Sign Release APK
       if: success()
       run: |
-        APK=$(find . -name "*-release-unsigned.apk" -o -name "*-release.apk" 2>/dev/null | head -1)
-        if [ -n "$APK" ] && [[ "$APK" == *"unsigned"* ]]; then
+        APK=$(find bin/ -name "*-release-unsigned.apk" 2>/dev/null | head -1)
+        if [ -n "$APK" ]; then
           echo "Signing $APK ..."
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" 2>/dev/null | head -1)
           ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name "zipalign" 2>/dev/null | head -1)
-          SIGNED="${APK%.apk}-signed.apk"
-          "$ZIPALIGN" -v 4 "$APK" "$SIGNED" 2>&1 || cp "$APK" "$SIGNED"
+          SIGNED="bin/LanPlayMonitor-1.0.0-release.apk"
+          "$ZIPALIGN" -v 4 "$APK" "${APK%.apk}-aligned.apk" 2>&1 || true
+          ALIGNED="${APK%.apk}-aligned.apk"
           "$APKSIGNER" sign \
             --ks "$PWD/com.lanplay.monitor.keystore" \
             --ks-key-alias "com.lanplay.monitor" \
             --ks-pass pass:android \
             --key-pass pass:android \
             --out "$SIGNED" \
-            "$SIGNED" 2>&1 || true
-          FINAL="LanPlayMonitor-1.0.0-release.apk"
-          cp "$SIGNED" "bin/$FINAL" 2>/dev/null || cp "$SIGNED" "./$FINAL"
-          echo "✅ Signed APK ready"
+            "$ALIGNED" 2>&1 || true
+          echo "✅ Signed APK: $SIGNED"
+        else
+          echo "No unsigned APK found, checking for already-signed..."
+          find bin/ -name "*.apk" 2>/dev/null
         fi
-        echo "=== Final files ==="
-        ls -lh bin/*.apk 2>/dev/null || ls -lh *.apk 2>/dev/null || echo "No APK found"
 
     # ===== 13. 上传 APK =====
     - name: Upload APK
-      if: success() || failure()
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: kivy-app-build
         path: |
           bin/*.apk
-          *.apk
         retention-days: 30
 
     # ===== 14. 上传 Keystore =====

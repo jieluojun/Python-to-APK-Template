@@ -85,7 +85,6 @@ android.allow_api_min = 21
 
 # 编译 SDK 版本（Android 13 = API 33）
 android.api = 33
-android.sdk = 33
 
 # 最低运行版本
 android.minapi = 21
@@ -113,19 +112,17 @@ p4a.bootstrap = sdl2
 # 强制使用 Java 17（Ubuntu CI 环境路径）
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
-# 指定 python-for-android 分支（develop 分支对 AAB/APK 兼容最好）
-p4a.branch = develop
+# python-for-android 分支（master 配 2024.1.21 最稳）
+p4a.branch = master
 
-# ==================== 输出格式控制（核心修复） ====================
+# ==================== 输出格式控制（核心） ====================
 
 # ✅ 强制输出 APK（不是 AAB）
 android.aab = False
 
-# ✅ 强制禁用 AAB 检查（修复 "requires AAB support" 报错）
-android.use_aab = False
-
-# ✅ 不生成 AAB 产物
-p4a.extra_args = --no-aab
+# ✅ release 阶段也打 APK（不是 AAB）
+# buildozer 1.5.0 官方支持的参数
+android.release_artifact = apk
 
 # ==================== APK 体积优化 ====================
 

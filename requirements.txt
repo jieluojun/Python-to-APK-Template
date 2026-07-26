@@ -1,0 +1,5 @@
+Cython==0.29.33
+buildozer==1.6.0
+python-for-android==2026.5.9
+kivy[base]==2.3.0
+https://github.com/kivymd/KivyMD/archive/master.zip

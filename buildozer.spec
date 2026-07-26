@@ -29,7 +29,7 @@ android.icon_background_color = #1a1a2e
 
 # 全屏/横竖屏
 # fullscreen = 0
-# orientation = portrait
+orientation = portrait
 
 # ===== Android 构建参数 =====
 android.accept_sdk_license = True

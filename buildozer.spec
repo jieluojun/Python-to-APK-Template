@@ -34,7 +34,7 @@ android.meta_data =
 # ===== Android 构建环境 =====
 android.accept_sdk_license = True
 android.allow_api_min = 21
-android.api = 33
+android.api = 34
 android.minapi = 21
 android.ndk = 25b
 android.ndk_api = 21

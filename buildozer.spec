@@ -1,23 +1,25 @@
 [app]
 
 # ===== 基本信息 =====
-title = LanPlayMonitor
-package.name = monitor
-package.domain = com.lanplay
+title = LanPlay Monitor
+package.name = lanplaymonitor
+package.domain = org.lanplay
 source.dir = .
-source.include_exts = py,kv,html,json,css,js
+source.include_exts = py,kv,html,json,css,js,md,txt
 entrypoint = main.py
 version = 1.0.0
 
 # ===== Python 依赖 =====
-# 极简：只需要 Flask + jnius（调用原生 WebView）
-# 不需要 Kivy！
-requirements = python3,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi
+# Kivy（提供稳定构建环境）+ Flask（你的监控服务）
+requirements = python3,kivy,flask,jinja2,markupsafe,werkzeug,itsdangerous,click,pyjnius,libiconv,libffi
 
 # ===== 图标 =====
 icon.filename = icon.png
 presplash.filename = presplash.png
 presplash.color = #1a1a2e
+android.icon_foreground_filename = icon_foreground.png
+android.icon_background_filename = icon_background.png
+android.icon_background_color = #1a1a2e
 
 # ===== 竖屏 =====
 orientation = portrait
@@ -25,11 +27,8 @@ fullscreen = 0
 
 # ===== 权限 =====
 android.permissions = INTERNET
-
-# ===== 安全配置 =====
-android.meta_data =
-    android:usesCleartextTraffic="true"
-    android:allowBackup="false"
+android.meta_data = android:usesCleartextTraffic="true"
+android.allow_backup = 0
 
 # ===== Android 构建环境 =====
 android.accept_sdk_license = True
@@ -46,15 +45,15 @@ p4a.gradle_dependencies = gradle:7.6.4
 p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
-# ===== 输出 APK =====
+# ===== 输出 APK（不是 AAB！）=====
 android.aab = False
 android.release_artifact = apk
-p4a.branch = master
 
-# ===== 体积优化 =====
+# ===== p4a 配置 =====
+p4a.branch = master
 p4a.archs = arm64-v8a,armeabi-v7a
 
-# Flask 需要 json，保留；其他可裁剪
+# ===== 体积优化 =====
 android.exclude_pythonlib =
     idlelib,
     lib2to3,
@@ -101,6 +100,12 @@ exclude_patterns =
 
 android.debuggable = False
 
+# ===== 签名（由 CI 注入）=====
+# android.keystore = com.lanplay.monitor.keystore
+# android.keystore_storepass = android
+# android.keystore_keypass = android
+# android.keystore_alias = com.lanplay.monitor
+
 [buildozer]
-log_level = 1
+log_level = 2
 warn_on_root = 1

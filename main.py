@@ -1,38 +1,58 @@
 #!/usr/bin/env python3
 """
 LanPlay Monitor - Android WebView Shell
-启动 Flask 服务 + 显示 WebView
+启动 server.py（你的 Flask 服务）+ 显示 WebView
+⚠️ 不修改 server.py，直接当子进程运行
 """
 import os
-import threading
+import sys
 import time
+import subprocess
+import threading
 
-# ===== 启动 Flask 服务 =====
-def start_flask():
-    """在子线程中启动 Flask 服务"""
-    # 等待 WebView 准备好再启动（给点时间让 Android 初始化）
-    time.sleep(2)
+# ===== 启动 server.py（你的监控服务）=====
+def start_server():
+    """把 server.py 作为子进程启动，完全不动它的代码"""
+    time.sleep(2)  # 等 Android 环境就绪
 
-    # 导入你的 Flask 应用
-    # server.py 里应该有类似：
-    #   from flask import Flask
-    #   app = Flask(__name__)
-    #   @app.route("/") ...
-    #   if __name__ == "__main__":
-    #       app.run(host="127.0.0.1", port=5000)
-    #
-    # 我们只 import server 模块，它会在 import 时启动 app
-    # 然后用 app.run() 启动服务
+    server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
-    import server  # 你的 Flask 代码
-    # 如果 server.py 里有 app = Flask(__name__)，直接用：
-    if hasattr(server, 'app'):
-        server.app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
-    else:
-        # 兼容直接运行 server.py 的方式
-        import subprocess
-        subprocess.Popen(["python", "-c", "import server; server.app.run(host='127.0.0.1', port=5000)"])
+    if not os.path.exists(server_path):
+        print(f"❌ server.py not found at {server_path}")
+        return
 
+    print(f"🚀 Starting server.py: {server_path}")
+
+    # 直接运行 python server.py
+    # 这样 server.py 里写的 app.run() 或任何启动方式都能正常工作
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, server_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        print(f"✅ server.py PID: {proc.pid}")
+
+        # 读取输出（调试用）
+        def read_output():
+            for line in proc.stdout:
+                print(f"[server] {line.decode('utf-8', errors='replace').strip()}")
+            for line in proc.stderr:
+                print(f"[server ERR] {line.decode('utf-8', errors='replace').strip()}")
+
+        t = threading.Thread(target=read_output, daemon=True)
+        t.start()
+
+    except Exception as e:
+        print(f"❌ Failed to start server.py: {e}")
+        # 如果子进程方式失败，尝试直接 import 运行
+        try:
+            import server
+            if hasattr(server, 'app'):
+                server.app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+        except Exception as e2:
+            print(f"❌ Fallback also failed: {e2}")
 
 # ===== 启动 WebView =====
 def start_webview():
@@ -40,22 +60,17 @@ def start_webview():
     from jnius import autoclass
     from android.runnable import run_on_ui_thread
 
-    # Android 原生类
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     WebView = autoclass('android.webkit.WebView')
     WebViewClient = autoclass('android.webkit.WebViewClient')
     LinearLayout = autoclass('android.widget.LinearLayout')
     LayoutParams = autoclass('android.widget.LinearLayout$LayoutParams')
-    Settings = autoclass('android.webkit.WebSettings')
 
     activity = PythonActivity.mActivity
 
     @run_on_ui_thread
     def create():
-        # 创建 WebView
         webview = WebView(activity)
-
-        # 启用 JavaScript（Flask 页面通常需要）
         settings = webview.getSettings()
         settings.setJavaScriptEnabled(True)
         settings.setDomStorageEnabled(True)
@@ -69,22 +84,19 @@ def start_webview():
         # 加载本地 Flask 服务
         webview.loadUrl("http://127.0.0.1:5000")
 
-        # 创建布局并添加 WebView
         layout = LinearLayout(activity)
         layout.setOrientation(LinearLayout.VERTICAL)
         params = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         layout.addView(webview, params)
 
-        # 设置到 Activity 上
         activity.setContentView(layout)
 
     create()
 
-
 # ===== 入口 =====
 if __name__ == "__main__":
-    # 后台线程启动 Flask
-    t = threading.Thread(target=start_flask, daemon=True)
+    # 后台线程启动 server.py（原样不动）
+    t = threading.Thread(target=start_server, daemon=True)
     t.start()
 
     # 主线程启动 WebView

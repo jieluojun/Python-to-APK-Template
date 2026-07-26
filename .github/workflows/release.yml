@@ -42,23 +42,25 @@ jobs:
             python3-pip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev \
             libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev
+            curl unzip openjdk-17-jdk libltdl-dev \
+            pngquant
 
     - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
         pip install buildozer cython==0.29.33
         pip install kivy==2.3.0
-        pip install kivymd==1.1.1
         pip install python-for-android
 
-    - name: Debug - List repo contents
+    - name: Optimize PNG assets
       run: |
-        echo "=== Repository root ==="
-        ls -la
-        echo ""
-        echo "=== Check buildozer.spec exists ==="
-        cat buildozer.spec | head -20
+        echo "=== Compressing PNG assets ==="
+        for f in icon.png icon_foreground.png icon_background.png presplash.png; do
+          if [ -f "$f" ]; then
+            pngquant --quality=60-80 --force --output "$f.q" "$f" && mv "$f.q" "$f" || true
+            echo "  $f: $(du -h "$f" | cut -f1)"
+          fi
+        done
 
     - name: Generate signing key (if not exists)
       id: generate_key
@@ -81,14 +83,13 @@ jobs:
           echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Build APK with Buildozer (Release)
+    - name: Build APK (force apk format)
       run: |
         export PATH="$HOME/.local/bin:$PATH"
 
-        echo "=== Environment Check ==="
+        echo "=== Environment ==="
         java -version 2>&1
         python --version
-        which buildozer
         buildozer --version 2>&1 || true
 
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
@@ -100,63 +101,130 @@ jobs:
         export P4A_RELEASE_KEYSTORE_PASSWD="android"
         export P4A_RELEASE_KEYALIAS_PASSWD="android"
 
-        # 清理旧构建
+        # 清理
         buildozer android clean 2>&1 | tee clean.log || true
 
-        echo "=== Starting release build ==="
-        # 正式打包 release APK
-        buildozer -v android release 2>&1 | tee buildozer.log
+        echo "=== Building APK (NOT AAB) ==="
+        # 关键: 用 `android apk` 而非 `android release`
+        # `android release` 在某些 p4a 版本会输出 AAB
+        # `android apk` 明确指定输出 APK 格式
+        buildozer -v android apk 2>&1 | tee buildozer.log
         BUILD_EXIT_CODE=${PIPESTATUS[0]}
         echo "Build exit code: $BUILD_EXIT_CODE"
 
-        echo "=== Searching for APK/AAB recursively ==="
-        find . -name "*.apk" -o -name "*.aab" 2>/dev/null | while read f; do
-          echo "Found: $f ($(du -h "$f" | cut -f1))"
+        echo "=== Looking for *.apk ==="
+        find . -name "*.apk" 2>/dev/null | while read f; do
+          echo "✅ Found APK: $f ($(du -h "$f" | cut -f1))"
         done
 
-        # 复制到根目录和 bin/
+        echo "=== Looking for *.aab (should be empty) ==="
+        find . -name "*.aab" 2>/dev/null | while read f; do
+          echo "⚠️ Found AAB: $f ($(du -h "$f" | cut -f1))"
+        done
+
+        # 收集 APK 到 bin/
         mkdir -p bin
         find . -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
-        find . -name "*.aab" -exec cp -v {} ./bin/ \; 2>/dev/null || true
-        find . -name "*.apk" -exec cp -v {} ./ \; 2>/dev/null || true
-        find . -name "*.aab" -exec cp -v {} ./ \; 2>/dev/null || true
 
-        echo "=== bin/ contents ==="
-        ls -la bin/ 2>/dev/null || echo "bin/ not found"
-
-    - name: Check if APK/AAB was built
-      id: check-build
-      run: |
-        echo "=== Checking for build artifacts ==="
-        ls -la *.apk *.aab bin/ 2>/dev/null || true
-
-        if ls bin/*.apk 1>/dev/null 2>&1 || ls bin/*.aab 1>/dev/null 2>&1; then
-          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "=== Built files in bin/ ==="
-          ls -la bin/
-        elif ls *.apk 1>/dev/null 2>&1 || ls *.aab 1>/dev/null 2>&1; then
-          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "=== Built files in root ==="
-          ls -la *.apk *.aab
+        # 如果 bin/ 里只有 aab 没有 apk, 尝试从 aab 转换
+        if ! ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "⚠️ No APK found in bin/, checking if we need to use bundletool..."
+          echo "BUILD_APK_FAILED=true" >> $GITHUB_OUTPUT
         else
-          echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "❌ No APK/AAB found!"
-          echo "=== Full .buildozer tree (last 30 lines) ==="
-          find .buildozer -type f 2>/dev/null | tail -30 || true
-          echo "=== buildozer.log tail ==="
-          tail -50 buildozer.log 2>/dev/null || echo "No buildozer.log"
+          echo "BUILD_APK_FAILED=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Upload APK/AAB artifact
-      if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
+        echo "=== Final bin/ contents ==="
+        ls -lh bin/ 2>/dev/null
+
+    - name: Sign APK with keystore
+      if: steps.build-android.outputs.BUILD_APK_FAILED != 'true'
+      run: |
+        APK=$(ls -t bin/*.apk | head -1)
+        if [ -z "$APK" ]; then
+          echo "❌ No APK to sign"
+          exit 1
+        fi
+        echo "=== Signing APK: $APK ==="
+        # 用 apksigner 签名(Android SDK 自带)
+        APKSIGNER="$ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner"
+        if [ ! -f "$APKSIGNER" ]; then
+          # 尝试找其他版本
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" 2>/dev/null | head -1)
+        fi
+        echo "Using apksigner: $APKSIGNER"
+        # 先 zipalign 再签名
+        ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/33.0.2/zipalign"
+        if [ ! -f "$ZIPALIGN" ]; then
+          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name "zipalign" 2>/dev/null | head -1)
+        fi
+        echo "Using zipalign: $ZIPALIGN"
+        UNSIGNED="${APK%.apk}-unsigned.apk"
+        SIGNED="${APK%.apk}-signed.apk"
+        cp "$APK" "$UNSIGNED"
+        "$ZIPALIGN" -v 4 "$UNSIGNED" "$SIGNED" 2>&1 || true
+        "$APKSIGNER" sign \
+          --ks "$PWD/com.lanplay.monitor.keystore" \
+          --ks-key-alias "com.lanplay.monitor" \
+          --ks-pass pass:android \
+          --key-pass pass:android \
+          --out "$SIGNED" \
+          "$UNSIGNED" 2>&1 || true
+        # 用签名后的覆盖原文件
+        cp "$SIGNED" "$APK"
+        echo "✅ APK signed: $APK ($(du -h "$APK" | cut -f1))"
+        # 验证签名
+        "$APKSIGNER" verify --verbose "$APK" 2>&1 || true
+
+    - name: Convert AAB to APK (fallback)
+      if: steps.build-android.outputs.BUILD_APK_FAILED == 'true'
+      run: |
+        echo "=== Trying to convert AAB → APK ==="
+        AAB=$(find . -name "*.aab" | head -1)
+        if [ -z "$AAB" ]; then
+          echo "❌ No AAB found either"
+          exit 1
+        fi
+        # 下载 bundletool
+        BUNDLETOOL="bundletool-all.jar"
+        if [ ! -f "$BUNDLETOOL" ]; then
+          wget -q "https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar" -O "$BUNDLETOOL"
+        fi
+        # 生成 universal APK
+        java -jar "$BUNDLETOOL" build-apks \
+          --mode=universal \
+          --bundle="$AAB" \
+          --output="converted.apks" \
+          --ks="$PWD/com.lanplay.monitor.keystore" \
+          --ks-key-alias="com.lanplay.monitor" \
+          --ks-pass=pass:android \
+          --key-pass=pass:android 2>&1
+        # 解压 universal APK
+        mkdir -p converted
+        unzip -o converted.apks -d converted/
+        find converted -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
+        echo "=== Converted APKs ==="
+        find converted -name "*.apk" -exec ls -lh {} \;
+
+    - name: Final check & upload prep
+      id: final-check
+      run: |
+        echo "=== Final APK check ==="
+        find . -name "*.apk" 2>/dev/null | while read f; do
+          echo "✅ $f ($(du -h "$f" | cut -f1))"
+        done
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
+        else
+          echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload APK artifact
+      if: steps.final-check.outputs.BUILD_FINAL_SUCCESS == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: kivy-app-build
-        path: |
-          bin/*.apk
-          bin/*.aab
-          *.apk
-          *.aab
+        path: bin/*.apk
         retention-days: 30
 
     - name: Upload signing key (if newly created)

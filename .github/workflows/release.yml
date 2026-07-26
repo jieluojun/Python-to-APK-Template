@@ -11,11 +11,11 @@ env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64 -Dorg.gradle.jvmargs=-Xmx2048m"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64 -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # ✅ 比 ubuntu-latest 更轻量、更快
 
     steps:
     - name: Checkout code
@@ -27,30 +27,57 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Set up Python 3.9
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.10'
+
+    # ✅ 缓存 pip 下载的包，第二次构建快 2-3 分钟
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    # ✅ 缓存 Buildozer 下载的 SDK/NDK/Gradle（最大加速点）
+    - name: Cache Buildozer downloads
+      uses: actions/cache@v4
+      with:
+        path: |
+          .buildozer/android/platform
+          .buildozer/android/packages
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
           git zip unzip \
           openjdk-17-jdk \
           autoconf automake libtool \
           pkg-config zlib1g-dev \
           libncurses5-dev libncursesw5-dev \
           cmake libffi-dev libssl-dev \
-          python3-pip curl
+          python3-pip curl \
+          libcairo2-dev \
+          libgirepository1.0-dev \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          libgl1-mesa-dev \
+          libgles2-mesa-dev \
+          ffmpeg 2>&1 | tail -5
 
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install Cython==0.29.33
-        pip install buildozer
-        pip install python-for-android
-        pip install kivy==2.3.0
+        python -m pip install --upgrade pip wheel setuptools
+        pip install Cython==0.29.33 buildozer python-for-android
+        pip install kivy[base]==2.3.0
         pip install https://github.com/kivymd/KivyMD/archive/master.zip
 
     - name: Create signing keystore (if not exists)
@@ -70,9 +97,7 @@ jobs:
     - name: Build Release APK
       run: |
         export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
-
-        buildozer -v android release
+        buildozer -v android release 2>&1 | tee buildozer.log
 
     - name: Find generated APK
       id: apk
@@ -80,11 +105,14 @@ jobs:
         mkdir -p output
         APK=$(find .buildozer -name "*-release.apk" | head -n 1)
         if [ -z "$APK" ]; then
-          echo "❌ APK not found"
+          echo "❌ APK not found, checking bin/..."
+          ls -la bin/ 2>/dev/null || true
+          ls -la .buildozer/android/platform/build-*/dists/*/ 2>/dev/null || true
           exit 1
         fi
         cp "$APK" output/LanPlayMonitor-release.apk
         echo "APK_PATH=output/LanPlayMonitor-release.apk" >> $GITHUB_OUTPUT
+        echo "✅ APK size: $(du -h "$APK" | cut -f1)"
 
     - name: Upload APK
       uses: actions/upload-artifact@v4

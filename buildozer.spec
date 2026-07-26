@@ -1,24 +1,37 @@
 [app]
 # 应用标题(可中文)
 title = LanPlayMonitor
+
 # 包名 = com.lanplay.monitor (domain + name)
 package.name = monitor
+
 # 域名反转格式(不能用 org.test 才能打 release)
 package.domain = com.lanplay
+
 # 工作目录
 source.dir = .
+
 # 需要打包的文件类型
 source.include_exts = py,png,jpg,kv,atlas
+
 # 主程序入口
 entrypoint = main.py
+
+# 软件版本
 version = 1.0.0
 
-# 依赖库(python3 + kivy + kivymd + 打包必需的系统库)
-requirements = python3,kivy,kivymd,libiconv,libffi
+# 软件图标
+icon.filename = icon.png
+
+# 启动图
+# presplash.filename = presplash.png
 
 # 全屏/横竖屏(按需打开)
 # fullscreen = 0
 # orientation = portrait
+
+# 依赖库(python3 + kivy + kivymd + 打包必需的系统库)
+requirements = python3,kivy,kivymd,libiconv,libffi
 
 # ===== Android 构建参数(不要乱改) =====
 android.accept_sdk_license = True

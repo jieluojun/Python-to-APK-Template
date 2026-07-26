@@ -31,6 +31,14 @@ android.icon_background_color = #1a1a2e
 # fullscreen = 0
 orientation = portrait
 
+# 允许 HTTP 明文传输 (因为 127.0.0.1:5000 通常是 HTTP)
+# 如果不加这个，Android 9.0+ 会默认拦截，导致页面白屏或加载失败
+android.allow_backup = 0
+android.permissions = INTERNET
+
+# 增加这一行以允许 HTTP 请求 (重要！)
+android.meta_data = android:usesCleartextTraffic="true"
+
 # ===== Android 构建参数 =====
 android.accept_sdk_license = True
 android.allow_api_min = 21

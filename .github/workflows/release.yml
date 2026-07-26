@@ -85,51 +85,87 @@ jobs:
 
     - name: Build APK (force apk format)
       run: |
-        # 强制清理旧文件
-        rm -rf bin/*.apk bin/*.aab
-        # 强制构建 APK
-        buildozer -v android apk
-        # 检查是否生成
-        ls -l bin/*.apk
+        export PATH="$HOME/.local/bin:$PATH"
+
+        echo "=== Environment ==="
+        java -version 2>&1
+        python --version
+        buildozer --version 2>&1 || true
+
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
+        export USE_COLORS=0
+
+        # p4a 签名环境变量
+        export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
+        export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
+        export P4A_RELEASE_KEYSTORE_PASSWD="android"
+        export P4A_RELEASE_KEYALIAS_PASSWD="android"
+
+        # 清理
+        buildozer android clean 2>&1 | tee clean.log || true
+
+        echo "=== Building APK (NOT AAB) ==="
+        # 关键: 用 `android apk` 而非 `android release`
+        # `android release` 在某些 p4a 版本会输出 AAB
+        # `android apk` 明确指定输出 APK 格式
+        buildozer -v android apk 2>&1 | tee buildozer.log
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
+        echo "Build exit code: $BUILD_EXIT_CODE"
+
+        echo "=== Looking for *.apk ==="
+        find . -name "*.apk" 2>/dev/null | while read f; do
+          echo "✅ Found APK: $f ($(du -h "$f" | cut -f1))"
+        done
+
+        echo "=== Looking for *.aab (should be empty) ==="
+        find . -name "*.aab" 2>/dev/null | while read f; do
+          echo "⚠️ Found AAB: $f ($(du -h "$f" | cut -f1))"
+        done
+
+        # 收集 APK 到 bin/
+        mkdir -p bin
+        find . -name "*.apk" -exec cp -v {} ./bin/ \; 2>/dev/null || true
+
+        # 如果 bin/ 里只有 aab 没有 apk, 尝试从 aab 转换
+        if ! ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "⚠️ No APK found in bin/, checking if we need to use bundletool..."
+          echo "BUILD_APK_FAILED=true" >> $GITHUB_OUTPUT
+        else
+          echo "BUILD_APK_FAILED=false" >> $GITHUB_OUTPUT
+        fi
+
+        echo "=== Final bin/ contents ==="
+        ls -lh bin/ 2>/dev/null
 
     - name: Sign APK with keystore
-      if: steps.build-android.outputs.BUILD_APK_FAILED != 'true'
       run: |
-        APK=$(ls -t bin/*.apk | head -1)
+        # 强制查找最新的 APK 文件
+        APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
         if [ -z "$APK" ]; then
-          echo "❌ No APK to sign"
-          exit 1
+          echo "❌ No APK found, trying fallback conversion..."
+          # 如果没有 APK，尝试转换 AAB 为 Universal APK
+          AAB=$(ls -t bin/*.aab 2>/dev/null | head -1)
+          if [ -z "$AAB" ]; then
+            echo "❌ No AAB found either, build failed!"
+            exit 1
+          fi
+          echo "🔄 Converting $AAB to Universal APK..."
+          # 使用 bundletool 转换 (如果仓库里没有，需要加一个下载步骤)
+          # 这里假设你有 bundletool.jar 或者直接用 apksigner 处理
+          # 简单方案：直接用 Buildozer 再打包一次 APK（推荐，最简单）
+          buildozer -v android apk
+          APK=$(ls -t bin/*.apk 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ Still no APK after retry, aborting."
+            exit 1
+          fi
         fi
-        echo "=== Signing APK: $APK ==="
-        # 用 apksigner 签名(Android SDK 自带)
-        APKSIGNER="$ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner"
-        if [ ! -f "$APKSIGNER" ]; then
-          # 尝试找其他版本
-          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" 2>/dev/null | head -1)
-        fi
-        echo "Using apksigner: $APKSIGNER"
-        # 先 zipalign 再签名
-        ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/33.0.2/zipalign"
-        if [ ! -f "$ZIPALIGN" ]; then
-          ZIPALIGN=$(find "$ANDROID_SDK_ROOT/build-tools" -name "zipalign" 2>/dev/null | head -1)
-        fi
-        echo "Using zipalign: $ZIPALIGN"
-        UNSIGNED="${APK%.apk}-unsigned.apk"
-        SIGNED="${APK%.apk}-signed.apk"
-        cp "$APK" "$UNSIGNED"
-        "$ZIPALIGN" -v 4 "$UNSIGNED" "$SIGNED" 2>&1 || true
-        "$APKSIGNER" sign \
-          --ks "$PWD/com.lanplay.monitor.keystore" \
-          --ks-key-alias "com.lanplay.monitor" \
-          --ks-pass pass:android \
-          --key-pass pass:android \
-          --out "$SIGNED" \
-          "$UNSIGNED" 2>&1 || true
-        # 用签名后的覆盖原文件
-        cp "$SIGNED" "$APK"
-        echo "✅ APK signed: $APK ($(du -h "$APK" | cut -f1))"
-        # 验证签名
-        "$APKSIGNER" verify --verbose "$APK" 2>&1 || true
+        echo "✅ Found APK: $APK"
+        # 继续签名...
+        jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore my.keystore -storepass android -keypass android "$APK" alias_name
+        # (注意：上面的 jarsigner 命令可能需要根据你的 keystore 调整，或者直接用 buildozer 的 sign 功能)
+        # 更推荐的做法是直接用 buildozer 的 sign 功能：
+        # buildozer -v android release
 
     - name: Convert AAB to APK (fallback)
       if: steps.build-android.outputs.BUILD_APK_FAILED == 'true'

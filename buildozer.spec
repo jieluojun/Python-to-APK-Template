@@ -1,107 +1,183 @@
 [app]
-# 应用标题(可中文)
-title = LanPlay Monitor
-# 包名 = com.lanplay.monitor (domain + name)
+
+# ==================== 应用基本信息 ====================
+
+# 应用在手机桌面上显示的名字（支持中文）
+title = LanPlayMonitor
+
+# 包名后半段，最终包名为：com.lanplay.monitor
 package.name = monitor
-# 域名反转格式(不能用 org.test 才能打 release)
+
+# 包名前半段（反向域名格式，不要用 org.test）
 package.domain = com.lanplay
-# 工作目录
+
+# 项目根目录（当前目录）
 source.dir = .
-# 需要打包的文件类型
-source.include_exts = py,kv
-# 主程序入口
+
+# 需要打包进 APK 的文件类型
+# py = 代码，kv = Kivy 布局，html/css/js/json = WebView 页面
+source.include_exts = py,kv,html,json,css,js
+
+# 应用入口文件（Kivy WebView 壳）
 entrypoint = main.py
+
+# 应用版本号
 version = 1.0.0
 
-# ===== 依赖(精简版) =====
-# 只保留最小依赖,去掉不必要的库
-requirements = python3,kivy,libiconv,libffi
+# ==================== Python 依赖 ====================
 
-# ===== 应用图标 & 启动图 =====
+# python3        : 运行时
+# kivy           : UI 框架
+# pyjnius        : 调用 Android 原生 WebView
+# libiconv/libffi: Kivy 底层依赖
+requirements = python3,kivy,pyjnius,libiconv,libffi
+
+# ==================== 图标 & 启动图 ====================
+
+# 桌面图标
 icon.filename = icon.png
+
+# 启动页（黑屏过渡画面）
 presplash.filename = presplash.png
+
+# 启动页背景色（深蓝黑，防白闪）
 presplash.color = #1a1a2e
 
-# 自适应图标
+# Android 8+ 自适应图标前景
 android.icon_foreground_filename = icon_foreground.png
+
+# 自适应图标背景
 android.icon_background_filename = icon_background.png
 android.icon_background_color = #1a1a2e
 
-# 全屏/横竖屏
-# fullscreen = 0
+# ==================== 屏幕方向 ====================
+
+# 强制竖屏（非常重要）
 orientation = portrait
 
-# 允许 HTTP 明文传输 (因为 127.0.0.1:5000 通常是 HTTP)
-# 如果不加这个，Android 9.0+ 会默认拦截，导致页面白屏或加载失败
-android.allow_backup = 0
+# 不全屏，保留状态栏（调试阶段更安全）
+fullscreen = 0
+
+# ==================== Android 权限 ====================
+
+# INTERNET：WebView + HTTP Server 必须
 android.permissions = INTERNET
 
-# 增加这一行以允许 HTTP 请求 (重要！)
-android.meta_data = android:usesCleartextTraffic="true"
+# ==================== Android 安全配置 ====================
 
-# ===== Android 构建参数 =====
+# 允许 HTTP 明文流量（127.0.0.1:5000 是 HTTP）
+android.meta_data =
+    android:usesCleartextTraffic="true"
+
+# ==================== Android 构建环境 ====================
+
+# 自动同意 SDK License（CI 必须）
 android.accept_sdk_license = True
+
+# 最低支持的 Android 版本（Android 5.0）
 android.allow_api_min = 21
-android.api = 33
 android.minapi = 21
-android.ndk = 25b
+
+# 编译 SDK 版本（Android 13）
+android.api = 33
 android.sdk = 33
+
+# NDK 版本（稳定版，不要乱改）
+android.ndk = 25b
 android.ndk_api = 21
 
-# Gradle
+# ==================== Gradle 配置 ====================
+
+# Gradle 下载地址（固定版本，防止 CI 随机失败）
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
+
+# Android Gradle Plugin 版本
 android.gradle_plugin = 7.4.2
+
+# Gradle 依赖声明
 p4a.gradle_dependencies = gradle:7.6.4
+
+# 使用 SDL2 作为 Kivy 的 Android 后端
 p4a.bootstrap = sdl2
+
+# 强制使用 Java 17（Ubuntu CI 环境）
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
-# 网络权限
-android.permissions = INTERNET
+# 指定 python-for-android 分支（稳定）
+p4a.branch = develop
 
-# 输出格式控制(关键: android.release 会触发 AAB 输出!)
-# android.aab = False → 告诉 p4a 打 APK 不是 AAB
-# buildozer android apk → release.yml 里用这个命令明确指定
+# ==================== 输出格式控制 ====================
+
+# ✅ 强制输出 APK（不是 AAB）
+# ❌ 千万不要写 android.release = True（那是 AAB 开关）
 android.aab = False
-# 不用 android.release = True (那是 AAB 的开关)
 
-# ===== 🔥 APK 体积优化(核心) =====
+# ==================== APK 体积优化 ====================
 
-# 1. 移除未使用的 Python 标准库模块(大幅减小体积)
-#    常见可移除的: tests, tkinter, turtle, sqlite3(不用数据库时),
-#    email(不发邮件时), xmlrpc(不用RPC时), curses(终端用不到)
-android.add_packageroot =
-android.exclude_pythonlib = idlelib,lib2to3,test,tests,tkinter,turtle,sqlite3,pydoc_data,ensurepip,venv,curses,email,mimetypes,http,urllib,xmlrpc,distutils,configparser,argparse,gettext,locale,logging,optparse,pdb,profile,pstats,timeit,trace,tracemalloc,typing,unittest,venv,zipapp
-
-# 2. 排除不需要的文件(减少 assets 体积)
-exclude_patterns = **/test/*, **/tests/*, **/*.pyc, **/__pycache__/*, **/*.md, **/*.txt, **/docs/*, **/examples/*, **/demos/*
-
-# 3. 只打包必要的依赖(如果不用 KivyMD 就去掉)
-#    如果用了 KivyMD,取消下面一行的注释
-# requirements = python3,kivy,kivymd,libiconv,libffi
-
-# 4. 不打包 Android x86 架构(只保留 arm64-v8a 和 armeabi-v7a)
-#    x86 模拟器用,真机不需要,去掉能省 ~30%
+# 只保留 ARM 真机架构（去掉 x86 模拟器，省 30%~40%）
 p4a.archs = arm64-v8a,armeabi-v7a
 
-# 5. 启用 ProGuard / R8 代码混淆压缩(减小 Java 层体积)
-android.enable_obfuscation = True
+# 裁剪不需要的 Python 标准库（大幅减小体积）
+# ⚠️ 保留 http.* / json，否则 WebView / HTTP Server 会崩
+android.exclude_pythonlib =
+    idlelib,
+    lib2to3,
+    test,
+    tests,
+    tkinter,
+    turtle,
+    sqlite3,
+    pydoc_data,
+    ensurepip,
+    venv,
+    curses,
+    email,
+    mimetypes,
+    xmlrpc,
+    distutils,
+    configparser,
+    argparse,
+    gettext,
+    locale,
+    optparse,
+    pdb,
+    profile,
+    pstats,
+    timeit,
+    trace,
+    tracemalloc,
+    typing,
+    unittest,
+    zipapp,
+    compileall,
+    dis,
+    inspect,
+    pickletools
 
-# 6. 移除调试符号(Release 不需要)
+# 排除非必要文件（进一步减小体积）
+exclude_patterns =
+    **/test/*,
+    **/tests/*,
+    **/*.pyc,
+    **/__pycache__/*,
+    **/*.md,
+    **/*.txt,
+    **/docs/*
+
+# 关闭调试符号（Release 包不需要）
 android.debuggable = False
 
-# 7. 压缩级别调最高
-p4a.compilepythondir = True
-
-# 8. 不生成 unaligned APK(减少中间产物)
-p4a.unaligned_apk = False
-
-# ===== Release 签名配置 =====
-# 签名由 GitHub Actions 通过环境变量注入
+# ==================== Release 签名 ====================
+# 以下内容由 GitHub Actions 自动注入，本地不需要写
 # android.keystore = com.lanplay.monitor.keystore
 # android.keystore_storepass = android
 # android.keystore_keypass = android
 # android.keystore_alias = com.lanplay.monitor
 
 [buildozer]
-log_level = 2
+
+# 日志级别：1 = 详细（调试阶段推荐），2 = 正常
+log_level = 1
+
+# 如果 source.dir 是根目录，发出警告
 warn_on_root = 1

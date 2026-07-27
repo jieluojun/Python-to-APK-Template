@@ -1431,7 +1431,6 @@ PAGE_HTML = r"""<!doctype html>
       list.querySelectorAll('.server-group').forEach(el => { existing.set(el.dataset.id, el); });
     }
 
-    // 对比并处理新增/移除的服务器，确保 _domCache 正确重建或同步
     const currentIds = new Set(state.servers.map(s => s.id));
     for (const [id, el] of existing.entries()) {
       if (!currentIds.has(id)) {
@@ -1818,28 +1817,34 @@ if platform == 'android':
 
     WebView = autoclass('android.webkit.WebView')
     WebViewClient = autoclass('android.webkit.WebViewClient')
-    activity = autoclass('org.kivy.android.PythonActivity').mActivity
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
 
     class BrowserWidget(Widget):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            Clock.schedule_once(self.create_webview, 0)
+            # 延时 0.5 秒确保 Activity 完全准备就绪，避免闪退
+            Clock.schedule_once(self.create_webview, 0.5)
 
         @run_on_ui_thread
         def create_webview(self, *args):
-            webview = WebView(activity)
-            settings = webview.getSettings()
-            settings.setJavaScriptEnabled(True)
-            settings.setDomStorageEnabled(True)
-            settings.setLoadWithOverviewMode(True)
-            settings.setUseWideViewPort(True)
-            
-            wvc = WebViewClient()
-            webview.setWebViewClient(wvc)
-            
-            # 加载本地后端服务页面
-            webview.loadUrl('http://127.0.0.1:5000/')
-            activity.setContentView(webview)
+            try:
+                activity = PythonActivity.mActivity
+                webview = WebView(activity)
+                settings = webview.getSettings()
+                settings.setJavaScriptEnabled(True)
+                settings.setDomStorageEnabled(True)
+                settings.setLoadWithOverviewMode(True)
+                settings.setUseWideViewPort(True)
+                settings.setDatabaseEnabled(True)
+                
+                wvc = WebViewClient()
+                webview.setWebViewClient(wvc)
+                
+                # 加载本地后端服务页面
+                webview.loadUrl('http://127.0.0.1:5000/')
+                activity.setContentView(webview)
+            except Exception as e:
+                print(f"[UI错误] 初始化 WebView 失败: {e}")
 
     class LanPlayMonitorApp(App):
         def build(self):

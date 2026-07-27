@@ -7,7 +7,7 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 source.include_patterns = image/*
 version = 1.0.0
 # 依赖
-requirements = python3,kivy,kivymd,libiconv,libffi
+requirements = python3,kivy,kivymd,openssl,certifi,libiconv,libffi
 icon.filename = icon.png
 # presplash.filename = presplash.png # 启动界面图片
 # 0=不启用全屏，1=启用全屏

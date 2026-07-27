@@ -28,7 +28,6 @@ android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
-android.permissions = INTERNET
 # 强制构建APK，然而并没有用
 android.aab = False
 # 签名配置
@@ -36,7 +35,6 @@ android.keystore = /home/runner/work/a/b/com.lanplay.monitor.keystore
 android.keystore_storepass = android
 android.keystore_keypass = android
 android.keystore_alias = com.lanplay.monitor
-
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE
 android.manifest.extra =
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

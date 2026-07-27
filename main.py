@@ -24,31 +24,10 @@
     "port": 11451,
     "type": "graphql",
     "region": "🇨🇳"
-  },
-  {
-    "id":"my-server2", 
-    "name": "我的服务器2",
-    "host": "example.com",
-    "port": 11451,
-    "type": "graphql",
-    "region": "🇨🇳"
   }
 ]
 注意：servers.json 中的服务器会与内置列表**合并**（同 id 以 json 为准），
       而非替换。环境变量 SERVERS_FILE 指定其他路径时则仅使用该文件。
-
-支持类型：
-- graphql：slp-server-rust，POST / 查询 serverInfo 和 room；
-- rest：switch-lan-play Node 版，GET /info（通常只有在线人数，没有房间详情）。
-
-环境变量：
-    HOST=0.0.0.0
-    PORT=5000
-    DEBUG=0
-    CACHE_TTL=12
-    REQUEST_TIMEOUT=5
-    UDP_SCAN_SECONDS=2.2
-    SERVERS_FILE=/path/to/servers.json
 """
 
 from __future__ import annotations
@@ -68,7 +47,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# ── 标准库 HTTP 客户端 / 服务器 ──
 import http.client
 import urllib.request
 import urllib.error
@@ -76,13 +54,13 @@ import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 常量 & 配置
+# 常量 & 配置（已优化刷新速度相关参数）
 # ══════════════════════════════════════════════════════════════════════════════
 
 APP_NAME = "direct-lan-play-monitor"
 CACHE_TTL = max(1, int(os.getenv("CACHE_TTL", "12")))
-REQUEST_TIMEOUT = max(1.0, float(os.getenv("REQUEST_TIMEOUT", "5")))
-MAX_WORKERS = 8
+REQUEST_TIMEOUT = max(1.0, float(os.getenv("REQUEST_TIMEOUT", "3"))) # 优化：适当缩短单次请求超时上限
+MAX_WORKERS = 32 # 优化：增大并发线程数，让多服务器同时扫描
 
 DEFAULT_SERVERS: list[dict[str, Any]] = [
     {
@@ -91,7 +69,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "tekn0.net",
       "port": 11451,
       "type": "graphql",
-      "region": "🇺🇸 美国"
+      "region": "🇺🇸 美国 加利福尼亚 旧金山 DigitalOcean"
     },
     {
       "id": "2",
@@ -99,7 +77,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "srv.jaxlewis.top",
       "port": 11451,
       "type": "graphql",
-      "region": "🇨🇳 河南"
+      "region": "🇨🇳 中国 河南 郑州 联通"
     },
     {
       "id": "3",
@@ -107,7 +85,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "switch.jayseateam.nl",
       "port": 11451,
       "type": "graphql",
-      "region": "🇳🇱 荷兰"
+      "region": "🇳🇱  荷兰 北荷兰 阿姆斯特丹"
     },
     {
       "id": "4",
@@ -115,7 +93,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "switch.jayseateam.nl",
       "port": 11453,
       "type": "graphql",
-      "region": "🇳🇱 荷兰"
+      "region": "🇳🇱 荷兰 北荷兰 阿姆斯特丹"
     },
     {
       "id": "5",
@@ -123,7 +101,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "lan.lbxmb.fr",
       "port": 11451,
       "type": "graphql",
-      "region": "🇫🇷 法国"
+      "region": "🇫🇷 法国 法兰西岛 巴黎"
     },
     {
       "id": "6",
@@ -139,7 +117,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "lp1.cpalm.org",
       "port": 11451,
       "type": "graphql",
-      "region": "🇨🇳 台湾"
+      "region": "🇨🇳 中国 台湾 高雄 中華電信"
     },
     {
       "id": "8",
@@ -147,7 +125,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "www.grayowlet.cn",
       "port": 11451,
       "type": "graphql",
-      "region": "🇨🇳 内蒙古"
+      "region": "🇨🇳 中国 内蒙古 锡林郭勒 联通"
     },
     {
       "id": "9",
@@ -155,7 +133,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "olunira.fun",
       "port": 11451,
       "type": "graphql",
-      "region": "🇨🇳 北京"
+      "region": "🇨🇳 中国 北京 阿里云"
     },
     {
       "id": "10",
@@ -163,7 +141,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "ns.mulaosi.cn",
       "port": 11451,
       "type": "graphql",
-      "region": "🇨🇳 广东"
+      "region": "🇨🇳 广东 清远 电信"
     },
     {
       "id": "11",
@@ -171,7 +149,7 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "switch.r3ps4j.nl",
       "port": 11452,
       "type": "graphql",
-      "region": "🇨🇳 丹麦"
+      "region": "🇨🇳 丹麦 首都 哥本哈根"
     },
     {
       "id": "12",
@@ -179,15 +157,24 @@ DEFAULT_SERVERS: list[dict[str, Any]] = [
       "host": "erdbeerbaerlp.de",
       "port": 11451,
       "type": "graphql",
-      "region": "🇩🇪 德国"
+      "region": "🇩🇪 德国 萨克森"
+    },
+    {
+      "id": "13",
+      "name": "tomodachilife",
+      "host": "8.138.237.87",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 中国 广东 广州 阿里云"
     }
 ]
 
-GAME_TITLES: dict[str, str] = {
+BUILTIN_GAME_TITLES: dict[str, str] = {
     "FFFFFFFFFFFFFFFF": "未知游戏",
     "01006A800016E000": "任天堂明星大乱斗 特别版",
     "0100152000022000": "马里奥赛车8 豪华版",
     "010029F00FCC4000": "马里奥网球 ACE",
+    "010028600EBDA000": "超级马里奥3D世界+狂怒世界",
     "0100DCA0064A6000": "路易吉洋馆3",
     "01006F8002326000": "集合啦！动物森友会",
     "0100F8F0000A2000": "喷射战士2",
@@ -220,7 +207,51 @@ GAME_TITLES: dict[str, str] = {
     "010051F0207B2000": "朋友收集 梦想生活",
     "01009970122E4000": "无主之地3 终极版",
     "0100CBF022E18000": "NBA 2K26",
+    "0100E4700C648000": "刀剑神域 夺命凶弹",
+    "0100EF200DA60000": "岛屿生存者",
+    "010090400D366000": "火炬之光2",
+    "0100C0401921A000": "热血物语SP",
+    "01003EB01C2F0000": "百万吨级武藏W",
+    "01005ED00CD70000": "破门而入：行动小队",
+    "01005FF00C7CC000": "极速俱乐部2",
+    "010001300D14A000": "城堡破坏者 重制版",
 }
+
+REMOTE_CHINESE_DB_URL = "https://v6.gh-proxy.org/https://raw.githubusercontent.com/jieluojun/lan-play-monitor/refs/heads/main/chinese_db.json"
+
+import ssl
+
+def load_game_titles() -> dict[str, str]:
+    """从远程仓库直接读取标题映射内容，并与内置映射合并（同键以远程为准）"""
+    merged_titles = dict(BUILTIN_GAME_TITLES)
+    print(f"[配置] 正在从远程仓库读取标题映射: {REMOTE_CHINESE_DB_URL}")
+    try:
+        req = urllib.request.Request(
+            REMOTE_CHINESE_DB_URL,
+            headers={"User-Agent": f"{APP_NAME}/1.0", "Accept": "application/json"}
+        )
+        
+        # 建立一个不验证 SSL 证书的上下文
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        # 将 context 传入 urlopen
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8-sig"))
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if k and v:
+                        merged_titles[str(k).upper()] = str(v)
+                print(f"[配置] 成功加载远程标题映射，共计 {len(data)} 条，合并后总数: {len(merged_titles)}")
+            else:
+                print("[配置警告] 远程标题映射格式不正确（非 JSON 对象），将仅使用内置映射")
+    except Exception as exc:
+        print(f"[配置警告] 无法从远程读取标题映射（{exc}），将降级使用内置映射")
+    return merged_titles
+
+# 启动时不直接加载远程标题，初始仅使用内置映射
+GAME_TITLES = dict(BUILTIN_GAME_TITLES)
 
 GRAPHQL_QUERY = """
 query PublicRoomSnapshot {
@@ -237,7 +268,7 @@ query PublicRoomSnapshot {
 }
 """.strip()
 
-UDP_SCAN_SECONDS = max(0.8, float(os.getenv("UDP_SCAN_SECONDS", "2.2")))
+UDP_SCAN_SECONDS = max(0.5, float(os.getenv("UDP_SCAN_SECONDS", "1.2"))) # 优化：适当缩短 UDP 扫描等待时间，提速响应
 LDN_PORT = 11452
 LDN_MAGIC = bytes.fromhex("00144511")
 LDN_SCAN_HEADER = LDN_MAGIC + bytes(8)
@@ -292,9 +323,15 @@ def int_or_zero(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
 
-def game_name(content_id: str) -> str:
+def get_game_info(content_id: str) -> dict[str, str]:
     normalized = str(content_id or "").upper()
-    return GAME_TITLES.get(normalized, f"未知游戏 ({normalized})" if normalized else "未知游戏")
+    game_name = GAME_TITLES.get(normalized)
+    if not game_name:
+        game_name = f"未知游戏 ({normalized})" if normalized else "未知游戏"
+    return {
+        "name": game_name,
+        "icon": f"https://tinfoil.media/ti/{normalized or 'FFFFFFFFFFFFFFFF'}/48/48"
+    }
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HTTP 请求（urllib 替代 requests）
@@ -357,7 +394,6 @@ class HTTPClient:
             return HTTPResponse(e, body, url, str(e))
         except (urllib.error.URLError, socket.timeout, OSError) as e:
             err_msg = e.reason if hasattr(e, 'reason') else str(e)
-            # 仍然返回一个有效响应对象，让调用方拿到耗时
             elapsed_ms = max(1, int((time.monotonic() - started) * 1000))
             dummy = HTTPResponse(None, b"", url, err_msg)
             dummy._elapsed_ms = elapsed_ms
@@ -451,12 +487,16 @@ def parse_network_info(payload: bytes, source_ip: str) -> dict[str, Any]:
         if len(node) < 0x40:
             break
         player_name = decode_player_name(node[0x0C : 0x2C])
-        if player_name and player_name not in players:
-            players.append(player_name)
+        if not player_name:
+            player_name = "未命名玩家"
+        players.append(player_name)
         nodes.append({"playerName": player_name})
     host = decode_player_name(payload[0x74 : 0x94])
-    if host and host not in players:
-        players.insert(0, host)
+    if not host:
+        host = players[0] if players else "未命名玩家"
+    elif not players:
+        players.append(host)
+
     advertise_length = min(int.from_bytes(payload[0x26A:0x26C], "little"), 384)
     advertise_data = payload[0x26C : 0x26C + advertise_length].hex()
     return {
@@ -641,53 +681,69 @@ def validate_server(raw: Any) -> dict[str, Any]:
     return {"id": server_id, "name": name, "host": host, "port": port, "type": protocol, "region": region}
 
 def load_servers() -> list[dict[str, Any]]:
-    """加载服务器列表。
-    优先读取 servers.json（如果存在），将其中的服务器**追加**到内置 DEFAULT_SERVERS 之后。
-    servers.json 中 id 与内置重复的，以 json 中的配置为准（覆盖内置）。
-    环境变量 SERVERS_FILE 可指定其他路径，此时仅使用该文件、不与内置合并。
-    """
     configured = os.getenv("SERVERS_FILE", "").strip()
     if configured:
-        # 显式指定了外部文件 → 仅使用该文件
         path = Path(configured).expanduser()
         if not path.is_file():
-            raise SystemExit(f"指定的服务器配置文件不存在：{path}")
+            raise RuntimeError(f"指定的服务器配置文件不存在：{path}")
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             print(f"[配置] 已读取 {path}")
         except (OSError, json.JSONDecodeError) as exc:
-            raise SystemExit(f"无法读取服务器配置 {path}：{exc}") from exc
+            raise RuntimeError(f"无法读取服务器配置 {path}：{exc}") from exc
         if not isinstance(raw, list) or not raw:
-            raise SystemExit("服务器配置必须是非空 JSON 数组")
+            raise RuntimeError("服务器配置必须是非空 JSON 数组")
         servers = [validate_server(item) for item in raw]
     else:
-        # 默认路径：同目录下的 servers.json
         path = Path(__file__).with_name("servers.json")
-        # 先拷贝内置列表
         merged: dict[str, dict] = {s["id"]: dict(s) for s in DEFAULT_SERVERS}
         if path.is_file():
             try:
                 extra = json.loads(path.read_text(encoding="utf-8"))
                 print(f"[配置] 已读取 {path}，将与内置服务器合并")
             except (OSError, json.JSONDecodeError) as exc:
-                raise SystemExit(f"无法读取服务器配置 {path}：{exc}") from exc
+                raise RuntimeError(f"无法读取服务器配置 {path}：{exc}") from exc
             if not isinstance(extra, list):
-                raise SystemExit("servers.json 必须是 JSON 数组")
+                raise RuntimeError("servers.json 必须是 JSON 数组")
             for item in extra:
                 srv = validate_server(item)
-                merged[srv["id"]] = srv  # 同 id 覆盖内置
+                merged[srv["id"]] = srv
         else:
             print(f"[配置] 未找到 {path}，使用内置服务器列表（{len(merged)} 个）")
         servers = list(merged.values())
-    # id 唯一性检查
     ids = [item["id"] for item in servers]
     if len(ids) != len(set(ids)):
-        raise SystemExit("服务器配置中存在重复 id")
+        raise RuntimeError("服务器配置中存在重复 id")
     return servers
 
-SERVERS = load_servers()
+# 启动时不加载 servers.json，仅使用默认内置列表
+SERVERS = list(DEFAULT_SERVERS)
 SERVERS_BY_ID = {item["id"]: item for item in SERVERS}
 ACTIVE_SCANNERS = {item["id"]: ActiveRoomScanner(item) for item in SERVERS}
+
+def refresh_config_and_servers() -> None:
+    """每次刷新/扫描服务器列表时，动态加载远程标题映射和 servers.json"""
+    global GAME_TITLES, SERVERS, SERVERS_BY_ID, ACTIVE_SCANNERS
+    try:
+        GAME_TITLES = load_game_titles()
+    except Exception as e:
+        print(f"[配置错误] 刷新远程标题映射失败: {e}")
+
+    try:
+        new_servers = load_servers()
+        SERVERS = new_servers
+        SERVERS_BY_ID = {item["id"]: item for item in SERVERS}
+        
+        current_ids = set(SERVERS_BY_ID.keys())
+        for sid in list(ACTIVE_SCANNERS.keys()):
+            if sid not in current_ids:
+                ACTIVE_SCANNERS[sid].close()
+                del ACTIVE_SCANNERS[sid]
+        for s in SERVERS:
+            if s["id"] not in ACTIVE_SCANNERS:
+                ACTIVE_SCANNERS[s["id"]] = ActiveRoomScanner(s)
+    except Exception as e:
+        print(f"[配置错误] 刷新服务器配置失败: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 房间数据规范化 & 扫描逻辑
@@ -696,6 +752,7 @@ ACTIVE_SCANNERS = {item["id"]: ActiveRoomScanner(item) for item in SERVERS}
 def normalize_room(raw: Any, server: dict[str, Any], index: int) -> dict[str, Any]:
     raw = raw if isinstance(raw, dict) else {}
     content_id = str(raw.get("contentId") or raw.get("content_id") or "").upper()
+    g_info = get_game_info(content_id)
     nodes = raw.get("nodes") if isinstance(raw.get("nodes"), list) else []
     players: list[str] = []
     for node in nodes:
@@ -703,11 +760,14 @@ def normalize_room(raw: Any, server: dict[str, Any], index: int) -> dict[str, An
             name = str(node.get("playerName") or node.get("player_name") or "").strip()
         else:
             name = str(node).strip()
-        if name and name not in players:
-            players.append(name)
+        if not name:
+            name = "未命名玩家"
+        players.append(name)
     host = str(raw.get("hostPlayerName") or raw.get("host_player_name") or "").strip()
-    if host and host not in players:
-        players.insert(0, host)
+    if not host:
+        host = players[0] if players else "未知玩家"
+    elif not players:
+        players.append(host)
     node_count = int_or_zero(raw.get("nodeCount", raw.get("node_count", len(players))))
     node_max = int_or_zero(raw.get("nodeCountMax", raw.get("node_count_max", 0)))
     return {
@@ -716,8 +776,9 @@ def normalize_room(raw: Any, server: dict[str, Any], index: int) -> dict[str, An
         "server_name": server["name"],
         "server_address": f"{server['host']}:{server['port']}",
         "content_id": content_id,
-        "game": game_name(content_id),
-        "host": host or (players[0] if players else "未知玩家"),
+        "game": g_info["name"],
+        "game_icon": g_info["icon"],
+        "host": host,
         "node_count": node_count or len(players),
         "node_count_max": node_max,
         "players": players,
@@ -763,7 +824,6 @@ def scan_graphql(server: dict[str, Any]) -> dict[str, Any]:
         result.update({"status": "online", "online": online, "idle": idle,
                        "active": max(0, online - idle), "room_count": len(rooms), "rooms": rooms})
     except Exception as exc:
-        # ✅ 即使失败也记录延迟，前端永远有值
         if result["latency_ms"] is None:
             result["latency_ms"] = max(1, int((time.monotonic() - started) * 1000))
         result["error"] = str(exc)
@@ -802,7 +862,8 @@ def scan_server(server: dict[str, Any], force: bool = False) -> tuple[dict[str, 
         if cached is not None:
             return cached, True
     result = scan_graphql(server) if server["type"] == "graphql" else scan_rest(server)
-    active_raw_rooms, scanner_error = ACTIVE_SCANNERS[server["id"]].scan()
+    active_scanner = ACTIVE_SCANNERS.get(server["id"])
+    active_raw_rooms, scanner_error = active_scanner.scan() if active_scanner else ([], "Scanner not found")
     active_rooms = [normalize_room(item, server, i + 1) for i, item in enumerate(active_raw_rooms)]
     merged: dict[str, dict[str, Any]] = {}
     for room in [*result.get("rooms", []), *active_rooms]:
@@ -818,13 +879,15 @@ def scan_server(server: dict[str, Any], force: bool = False) -> tuple[dict[str, 
         result["online"] = max(int_or_zero(result.get("online")), sum(max(1, r["node_count"]) for r in rooms))
         result["active"] = max(0, result["online"] - int_or_zero(result.get("idle")))
         result["error"] = ""
-    # ✅ 最终兜底：绝不让 latency_ms 为 None
     if result.get("latency_ms") is None:
         result["latency_ms"] = -1
     cache.set(key, result)
     return result, False
 
 def scan_all(force: bool = False) -> tuple[list[dict[str, Any]], bool]:
+    # 每次刷新服务器列表时加载最新配置
+    refresh_config_and_servers()
+    
     results: dict[str, dict[str, Any]] = {}
     all_cached = True
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(SERVERS))) as executor:
@@ -880,7 +943,7 @@ def make_json_response(data: dict[str, Any], cache_hit: bool = False,
     return body, headers, status
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 前端页面（已删除两片区域 + 延迟永不丢失）
+# 前端页面
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAGE_HTML = r"""<!doctype html>
@@ -933,7 +996,6 @@ PAGE_HTML = r"""<!doctype html>
     .glass{border:1px solid rgba(255,255,255,.8);background:var(--card);box-shadow:var(--shadow);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);transition:var(--transition)}
     @media (prefers-color-scheme: dark){.glass{border-color:rgba(255,255,255,.05)}}
 
-    /* hero：品牌 + 实时扫描 + 刷新按钮 */
     .hero{margin-top:0;min-height:68px;border-radius:var(--radius-lg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:12px;z-index:100}
     .brand{display:flex;align-items:center;gap:12px;min-width:0;flex-shrink:0}
     .logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#fff970,#ffd626);box-shadow:inset 0 0 0 2px rgba(255,255,255,.7),0 4px 12px rgba(255,200,40,.25);font-size:20px;animation:pulse 3s ease-in-out infinite;flex-shrink:0}
@@ -990,28 +1052,57 @@ PAGE_HTML = r"""<!doctype html>
     .addr-text:active{background:rgba(25,200,174,.15)}
     .addr-copied{color:#19c8ae!important;background:rgba(25,200,174,.12)!important}
 
-    .server-stats{display:flex;gap:16px;align-items:center;flex-shrink:0}
-    .server-stats .stat-item{text-align:center}
-    .server-stats .stat-item span{display:block;font-size:10.5px;color:var(--muted);font-weight:600}
-    .server-stats .stat-item b{font-size:18px;font-weight:900;line-height:1.2}
+    .server-stats{
+      display:grid;
+      grid-template-columns:repeat(4, 1fr);
+      width:280px;
+      gap:8px;
+      align-items:start;
+      flex-shrink:0;
+    }
+    .stat-item{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      text-align:center;
+      min-width:0;
+    }
+    .stat-item span{
+      display:block;
+      font-size:10.5px;
+      color:var(--muted);
+      font-weight:600;
+      margin-bottom:2px;
+      line-height:1.2;
+    }
+    .stat-item b{
+      font-size:18px;
+      font-weight:900;
+      line-height:22px;
+      height:22px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
     .stat-item.online b{color:#2b8a6f} .stat-item.idle b{color:#b8860b} .stat-item.rooms b{color:#1a73c0}
     @media (prefers-color-scheme: dark){.stat-item.online b{color:#3dd9b8}.stat-item.idle b{color:#ffb347}.stat-item.rooms b{color:#7ab8ff}}
 
-    .latency-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;white-space:nowrap}
-    .latency-badge.fast{color:#17776b;background:#dcf6f1}
-    .latency-badge.slow{color:#a52639;background:#fff0f2}
-    .latency-badge.normal{color:#555;background:rgba(125,175,210,.1)}
-    .latency-badge.error{color:#fff;background:#dc3048;font-weight:800;padding:3px 10px}
-    @media (prefers-color-scheme: dark){.latency-badge.fast{color:#3dd9b8;background:rgba(61,217,184,.12)}.latency-badge.slow{color:#ff5a6e;background:rgba(255,90,110,.12)}.latency-badge.normal{color:var(--muted);background:rgba(255,255,255,.06)}.latency-badge.error{color:#fff;background:#ff5a6e}}
-
-    .chevron{
-      width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
-      background:rgba(125,175,210,.1);color:var(--muted);font-size:14px;font-weight:900;
-      transition:transform .25s cubic-bezier(.4,0,.2,1);flex-shrink:0;
-      will-change:transform;
+    .stat-item.latency b{
+      font-size:15px;
+      line-height:22px;
+      height:22px;
     }
-    .server-group.open .chevron{transform:rotate(180deg);background:rgba(97,194,233,.18);color:#0c5d91}
-    @media (prefers-color-scheme: dark){.server-group.open .chevron{color:#7dd3fc}}
+    .latency-badge{display:flex;align-items:center;justify-content:center;background:transparent!important;}
+    .latency-badge.fast{color:#17776b;}
+    .latency-badge.normal{color:var(--muted);}
+    .latency-badge.slow{color:#a52639;}
+    .latency-badge.error{color:var(--muted);font-weight:900;}
+    @media (prefers-color-scheme: dark){
+      .latency-badge.fast{color:#3dd9b8;}
+      .latency-badge.normal{color:var(--muted);}
+      .latency-badge.slow{color:#ff5a6e;}
+      .latency-badge.error{color:var(--muted);}
+    }
 
     .server-body{
       display:grid;grid-template-rows:0fr;overflow:hidden;
@@ -1034,6 +1125,7 @@ PAGE_HTML = r"""<!doctype html>
     .room-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
     .room-host{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px}
     .room-host::before{content:'🏠';font-size:15px}
+    .room-host-icon{width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0;vertical-align:middle}
     .room-game{font-size:12.5px;padding:4px 12px;border-radius:999px;background:#e9f5fb;color:#326887;font-weight:700;white-space:nowrap}
     @media (prefers-color-scheme: dark){.room-game{background:rgba(97,194,233,.12);color:#7dd3fc}}
     .room-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:13px;color:#376482;font-weight:600}
@@ -1057,7 +1149,6 @@ PAGE_HTML = r"""<!doctype html>
     .filter-tab.active{background:#cde9fa;color:#0c5d91;font-weight:800;box-shadow:0 2px 8px rgba(97,194,233,.25)}
     @media (prefers-color-scheme: dark){.filter-tab{background:rgba(255,255,255,.06)}.filter-tab:hover{background:rgba(255,255,255,.10)}.filter-tab.active{background:rgba(97,194,233,.20);color:#7dd3fc}}
 
-    /* footer 已精简：只保留版权行 */
     footer{text-align:center;padding:24px 16px 8px;color:#55758c;font-size:12px;line-height:1.9;margin-top:12px}
     @media (prefers-color-scheme: dark){footer{color:var(--muted)}}
 
@@ -1070,7 +1161,7 @@ PAGE_HTML = r"""<!doctype html>
       .ov-card{padding:14px 8px}
       .ov-card b{font-size:22px}
       .server-head{padding:14px 16px;gap:10px}
-      .server-stats{gap:10px}
+      .server-stats{width:250px;gap:6px}
       .server-name{font-size:14.5px}
     }
 
@@ -1093,11 +1184,10 @@ PAGE_HTML = r"""<!doctype html>
       .server-name{font-size:13.5px;gap:5px}
       .server-name .region{font-size:10px;padding:1px 6px}
       .server-detail{font-size:11px;gap:6px;margin-top:2px}
-      .server-stats{gap:8px}
+      .server-stats{width:210px;gap:4px}
       .server-stats .stat-item span{font-size:9.5px}
-      .server-stats .stat-item b{font-size:15px}
-      .latency-badge{font-size:10px;padding:2px 6px}
-      .chevron{width:24px;height:24px;font-size:12px}
+      .server-stats .stat-item b{font-size:15px;height:18px;line-height:18px}
+      .stat-item.latency b{font-size:12px;height:18px;line-height:18px}
       .server-group.open .server-body{padding:0 14px 14px}
       .room-list{gap:8px}
       .room-item{padding:14px;border-radius:14px}
@@ -1117,6 +1207,7 @@ PAGE_HTML = r"""<!doctype html>
       .scan{font-size:10.5px;gap:6px}
       .scan .refresh{padding:6px 10px;font-size:11px}
       .server-detail .addr-text{display:none}
+      .server-stats{grid-template-columns:repeat(3,1fr);width:150px;}
       .server-stats .stat-item.idle{display:none}
     }
 
@@ -1169,7 +1260,6 @@ PAGE_HTML = r"""<!doctype html>
 
   const statusDot = s => s==='online' ? 'online' : s==='checking' ? 'checking' : 'offline';
 
-  // 复制到剪贴板 + 视觉反馈
   function copyAddr(text, el){
     const done = () => {
       el.classList.add('addr-copied');
@@ -1195,19 +1285,15 @@ PAGE_HTML = r"""<!doctype html>
     cb && cb();
   }
 
-  // ✅ 延迟显示：离线显示 ! 错误，在线按数值分色
   function latencyHTML(s){
-    // 离线 / 错误 → 显示 "! 错误"
     if(s.status !== 'online' || s.error || s.latency_ms == null || s.latency_ms < 0){
-      return '<span class="latency-badge error">! 错误</span>';
+      return '<b class="latency-badge error">-</b>';
     }
     const lat = s.latency_ms;
-    if(lat < 100){
-      return `<span class="latency-badge fast">${lat}ms</span>`;
-    } else if(lat > 300){
-      return `<span class="latency-badge slow">${lat}ms</span>`;
+    if(lat <= 300){
+      return `<b class="latency-badge fast">${lat}ms</b>`;
     } else {
-      return `<span class="latency-badge normal">${lat}ms</span>`;
+      return `<b class="latency-badge slow">${lat}ms</b>`;
     }
   }
 
@@ -1215,9 +1301,13 @@ PAGE_HTML = r"""<!doctype html>
     const players = Array.isArray(room.players) ? room.players : [];
     const count = `${room.node_count||players.length}${room.node_count_max?' / '+room.node_count_max:''} 人`;
     const gameVal = String(room.game || '');
+    const iconUrl = room.game_icon || 'https://tinfoil.media/ti/FFFFFFFFFFFFFFFF/48/48';
     return `<div class="room-item" data-game="${gameVal}">
       <div class="room-top">
-        <div class="room-host">${esc(room.host||'未知房间')}</div>
+        <div class="room-host">
+          <span>${esc(room.host||'未知房间')}</span>
+          <img src="${esc(iconUrl)}" alt="${esc(room.game)}" title="${esc(room.game)}" class="room-host-icon" loading="lazy">
+        </div>
         <span class="room-game">${esc(room.game)}</span>
       </div>
       <div class="room-meta">
@@ -1341,6 +1431,15 @@ PAGE_HTML = r"""<!doctype html>
       list.querySelectorAll('.server-group').forEach(el => { existing.set(el.dataset.id, el); });
     }
 
+    // 对比并处理新增/移除的服务器，确保 _domCache 正确重建或同步
+    const currentIds = new Set(state.servers.map(s => s.id));
+    for (const [id, el] of existing.entries()) {
+      if (!currentIds.has(id)) {
+        el.remove();
+        existing.delete(id);
+      }
+    }
+
     const order = [];
 
     state.servers.forEach((s) => {
@@ -1362,7 +1461,7 @@ PAGE_HTML = r"""<!doctype html>
         if(nameEl && nameEl.innerHTML !== nameHtml) nameEl.innerHTML = nameHtml;
 
         const detailEl = group.querySelector('.server-detail');
-        const detailHtml = `<span class="addr-text" title="点击复制地址">${esc(s.address)}</span>${latencyHTML(s)}`;
+        const detailHtml = `<span class="addr-text" title="点击复制地址">${esc(s.address)}</span>`;
         if(detailEl && detailEl.innerHTML !== detailHtml) detailEl.innerHTML = detailHtml;
         const addrEl = group.querySelector('.addr-text');
         if(addrEl && !addrEl._copyBound){ addrEl._copyBound=true; addrEl.addEventListener('click', (e)=>{ e.stopPropagation(); copyAddr(s.address, addrEl); }); }
@@ -1370,7 +1469,18 @@ PAGE_HTML = r"""<!doctype html>
         const statBs = group.querySelectorAll('.stat-item b');
         if(statBs.length>=3){
           const vals = [String(s.online||0), String(s.idle||0), String(s.room_count||0)];
-          statBs.forEach((b,i)=>{ if(b.textContent!==vals[i]) b.textContent=vals[i]; });
+          statBs[0].textContent = vals[0];
+          statBs[1].textContent = vals[1];
+          statBs[2].textContent = vals[2];
+        }
+
+        const latencyEl = group.querySelector('.stat-item.latency');
+        if(latencyEl){
+          const badge = latencyEl.querySelector('.latency-badge');
+          const newBadge = latencyHTML(s);
+          if(!badge || badge.outerHTML !== newBadge){
+            latencyEl.innerHTML = `<span>延迟</span>${newBadge}`;
+          }
         }
 
         const shouldOpen = state.expanded.has(s.id);
@@ -1397,15 +1507,17 @@ PAGE_HTML = r"""<!doctype html>
               <div class="server-name">${esc(s.name)} ${regionTxt}</div>
               <div class="server-detail">
                 <span class="addr-text" title="点击复制地址">${esc(s.address)}</span>
-                ${latencyHTML(s)}
               </div>
             </div>
             <div class="server-stats">
               <div class="stat-item online"><span>在线</span><b>${s.online||0}</b></div>
               <div class="stat-item idle"><span>空闲</span><b>${s.idle||0}</b></div>
               <div class="stat-item rooms"><span>房间</span><b>${s.room_count||0}</b></div>
+              <div class="stat-item latency">
+                <span>延迟</span>
+                ${latencyHTML(s)}
+              </div>
             </div>
-            <div class="chevron">⌄</div>
           </div>
           <div class="server-body"><div class="body-inner">
             ${errMsg}
@@ -1413,7 +1525,6 @@ PAGE_HTML = r"""<!doctype html>
           </div></div>`;
         existing.set(s.id, div);
         div.querySelector('.server-head').addEventListener('click', (e) => {
-          // 如果点击的是地址，不触发展开/折叠
           if(e.target.closest('.addr-text')) return;
           const id = div.dataset.id;
           if(state.expanded.has(id)){ state.expanded.delete(id); div.classList.remove('open'); }
@@ -1424,8 +1535,6 @@ PAGE_HTML = r"""<!doctype html>
       }
       order.push(existing.get(s.id));
     });
-
-    existing.forEach((el, id) => { if(!state.servers.find(s=>s.id===id)){ el.remove(); existing.delete(id); } });
 
     if(state.firstLoad || list.children.length === 0){
       list.innerHTML = '';
@@ -1585,7 +1694,7 @@ PAGE_HTML = r"""<!doctype html>
 </body></html>"""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HTTP 请求处理器 (http.server)
+# HTTP 请求处理器
 # ══════════════════════════════════════════════════════════════════════════════
 
 class MonitorHandler(BaseHTTPRequestHandler):
@@ -1681,80 +1790,75 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "仅支持 GET 请求"}, status=405)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 启动入口（已适配 Android / 手机 Python）
+# 启动入口 (支持 Kivy Android 内嵌 WebView 启动)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# 备用
-# if __name__ == "__main__":
-    # host = os.getenv("HOST", "0.0.0.0")
-    # port = int(os.getenv("PORT", "5000"))
-
-    # print(f"[启动] {APP_NAME}")
-    # print(f"[监听] http://{host}:{port}")
-    # print(f"[服务器数] {len(SERVERS)}")
-    # print(f"[缓存TTL] {CACHE_TTL}s  请求超时 {REQUEST_TIMEOUT}s  UDP扫描 {UDP_SCAN_SECONDS}s")
-    # print("按 Ctrl+C 停止")
-
-    # server = HTTPServer((host, port), MonitorHandler)
-    # server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # try:
-        # server.serve_forever()
-    # except KeyboardInterrupt:
-        # print("\n[停止] 正在关闭...")
-        # server.server_close()
-        # for scanner in ACTIVE_SCANNERS.values():
-            # scanner.close()
-        # print("[停止] 已关闭")
-
-if __name__ == "__main__":
-    import webbrowser
-    import subprocess
-
-    host = os.getenv("HOST", "0.0.0.0")
+def start_server():
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "5000"))
-    url = f"http://{host}:{port}/"
-
+    
     print(f"[启动] {APP_NAME}")
-    print(f"\033[94m[监听] {url}\033[0m")
-    print("\033[93m👉 点击上方链接，或用浏览器打开 👈\033[0m")
-
+    print(f"[监听] http://{host}:{port}")
+    
     server = HTTPServer((host, port), MonitorHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    def open_browser() -> None:
-        time.sleep(0.4)
-        try:
-            subprocess.run(
-                ["am", "start", "--user", "0",
-                 "-a", "android.intent.action.VIEW",
-                 "-d", url],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
-            )
-            print("[系统] 已尝试唤起系统浏览器")
-            return
-        except Exception:
-            pass
-        try:
-            subprocess.run(
-                ["termux-open-url", url],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
-            )
-            print("[Termux] 已尝试打开浏览器")
-            return
-        except Exception:
-            pass
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-
-    threading.Thread(target=open_browser, daemon=True).start()
-
     try:
         server.serve_forever()
+    except Exception:
+        server.server_close()
+
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.uix.widget import Widget
+from kivy.utils import platform
+
+if platform == 'android':
+    from jnius import autoclass
+    from android.runnable import run_on_ui_thread
+
+    WebView = autoclass('android.webkit.WebView')
+    WebViewClient = autoclass('android.webkit.WebViewClient')
+    activity = autoclass('org.kivy.android.PythonActivity').mActivity
+
+    class BrowserWidget(Widget):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            Clock.schedule_once(self.create_webview, 0)
+
+        @run_on_ui_thread
+        def create_webview(self, *args):
+            webview = WebView(activity)
+            settings = webview.getSettings()
+            settings.setJavaScriptEnabled(True)
+            settings.setDomStorageEnabled(True)
+            settings.setLoadWithOverviewMode(True)
+            settings.setUseWideViewPort(True)
+            
+            wvc = WebViewClient()
+            webview.setWebViewClient(wvc)
+            
+            # 加载本地后端服务页面
+            webview.loadUrl('http://127.0.0.1:5000/')
+            activity.setContentView(webview)
+
+    class LanPlayMonitorApp(App):
+        def build(self):
+            t = threading.Thread(target=start_server, daemon=True)
+            t.start()
+            return BrowserWidget()
+else:
+    class LanPlayMonitorApp(App):
+        def build(self):
+            t = threading.Thread(target=start_server, daemon=True)
+            t.start()
+            print("请在浏览器打开 http://127.0.0.1:5000/")
+            return Widget()
+
+if __name__ == "__main__":
+    try:
+        LanPlayMonitorApp().run()
     except KeyboardInterrupt:
         print("\n[停止] 正在关闭...")
-        server.server_close()
         for scanner in ACTIVE_SCANNERS.values():
             scanner.close()
         print("[停止] 已关闭")

@@ -9,15 +9,46 @@
 - 所有 UDP 扫描、房间解析逻辑保持不变
 
 启动：
-    python lan_play_monitor.py
-    # 浏览器打开 http://127.0.0.1:5000/
+    python Lan-Play房间监控2.0.py
+    # 浏览器打开 http://0.0.0.0:5000/
 
 局域网访问：
-    HOST=0.0.0.0 python lan_play_monitor.py
+    HOST=0.0.0.0 python Lan-Play房间监控2.0.py
+
+可选，创建 servers.json 文件（放在本脚本同目录）内容格式为：
+[
+  {
+    "id":"my-server", 
+    "name": "我的服务器",
+    "host": "example.com",
+    "port": 11451,
+    "type": "graphql",
+    "region": "🇨🇳"
+  },
+  {
+    "id":"my-server2", 
+    "name": "我的服务器2",
+    "host": "example.com",
+    "port": 11451,
+    "type": "graphql",
+    "region": "🇨🇳"
+  }
+]
+注意：servers.json 中的服务器会与内置列表**合并**（同 id 以 json 为准），
+      而非替换。环境变量 SERVERS_FILE 指定其他路径时则仅使用该文件。
 
 支持类型：
-- graphql：slp-server-rust
-- rest：switch-lan-play Node 版
+- graphql：slp-server-rust，POST / 查询 serverInfo 和 room；
+- rest：switch-lan-play Node 版，GET /info（通常只有在线人数，没有房间详情）。
+
+环境变量：
+    HOST=0.0.0.0
+    PORT=5000
+    DEBUG=0
+    CACHE_TTL=12
+    REQUEST_TIMEOUT=5
+    UDP_SCAN_SECONDS=2.2
+    SERVERS_FILE=/path/to/servers.json
 """
 
 from __future__ import annotations
@@ -37,6 +68,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# ── 标准库 HTTP 客户端 / 服务器 ──
 import http.client
 import urllib.request
 import urllib.error
@@ -53,18 +85,102 @@ REQUEST_TIMEOUT = max(1.0, float(os.getenv("REQUEST_TIMEOUT", "5")))
 MAX_WORKERS = 8
 
 DEFAULT_SERVERS: list[dict[str, Any]] = [
-    {"id": "1", "name": "tekn0", "host": "tekn0.net", "port": 11451, "type": "graphql", "region": "🇺🇸 美国"},
-    {"id": "2", "name": "jaxlewis", "host": "srv.jaxlewis.top", "port": 11451, "type": "graphql", "region": "🇨🇳 河南"},
-    {"id": "3", "name": "jaysea1", "host": "switch.jayseateam.nl", "port": 11451, "type": "graphql", "region": "🇳🇱 荷兰"},
-    {"id": "4", "name": "jaysea2", "host": "switch.jayseateam.nl", "port": 11453, "type": "graphql", "region": "🇳🇱 荷兰"},
-    {"id": "5", "name": "lbxmb", "host": "lan.lbxmb.fr", "port": 11451, "type": "graphql", "region": "🇫🇷 法国"},
-    {"id": "6", "name": "muitxobem", "host": "muitxobem-lanplay.ddns.net", "port": 11451, "type": "graphql", "region": "🇺🇸 美国"},
-    {"id": "7", "name": "lp1", "host": "lp1.cpalm.org", "port": 11451, "type": "graphql", "region": "🇨🇳 台湾"},
-    {"id": "8", "name": "owlet", "host": "www.grayowlet.cn", "port": 11451, "type": "graphql", "region": "🇨🇳 内蒙古"},
-    {"id": "9", "name": "olunira", "host": "olunira.fun", "port": 11451, "type": "graphql", "region": "🇨🇳 北京"},
-    {"id": "10", "name": "mulaosi", "host": "ns.mulaosi.cn", "port": 11451, "type": "graphql", "region": "🇨🇳 广东"},
-    {"id": "11", "name": "r3ps4j", "host": "switch.r3ps4j.nl", "port": 11452, "type": "graphql", "region": "🇩🇰 丹麦"},
-    {"id": "12", "name": "erdbeerbaerlp", "host": "erdbeerbaerlp.de", "port": 11451, "type": "graphql", "region": "🇩🇪 德国"},
+    {
+      "id": "1",
+      "name": "tekn0",
+      "host": "tekn0.net",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇺🇸 美国"
+    },
+    {
+      "id": "2",
+      "name": "jaxlewis",
+      "host": "srv.jaxlewis.top",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 河南"
+    },
+    {
+      "id": "3",
+      "name": "jaysea1",
+      "host": "switch.jayseateam.nl",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇳🇱 荷兰"
+    },
+    {
+      "id": "4",
+      "name": "jaysea2",
+      "host": "switch.jayseateam.nl",
+      "port": 11453,
+      "type": "graphql",
+      "region": "🇳🇱 荷兰"
+    },
+    {
+      "id": "5",
+      "name": "lbxmb",
+      "host": "lan.lbxmb.fr",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇫🇷 法国"
+    },
+    {
+      "id": "6",
+      "name": "muitxobem",
+      "host": "muitxobem-lanplay.ddns.net",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇺🇸 美国"
+    },   
+    {
+      "id": "7",
+      "name": "lp1",
+      "host": "lp1.cpalm.org",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 台湾"
+    },
+    {
+      "id": "8",
+      "name": "owlet",
+      "host": "www.grayowlet.cn",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 内蒙古"
+    },
+    {
+      "id": "9",
+      "name": "olunira",
+      "host": "olunira.fun",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 北京"
+    },
+    {
+      "id": "10",
+      "name": "mulaosi",
+      "host": "ns.mulaosi.cn",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇨🇳 广东"
+    },
+    {
+      "id": "11",
+      "name": "r3ps4j",
+      "host": "switch.r3ps4j.nl",
+      "port": 11452,
+      "type": "graphql",
+      "region": "🇨🇳 丹麦"
+    },
+    {
+      "id": "12",
+      "name": "erdbeerbaerlp",
+      "host": "erdbeerbaerlp.de",
+      "port": 11451,
+      "type": "graphql",
+      "region": "🇩🇪 德国"
+    }
 ]
 
 GAME_TITLES: dict[str, str] = {
@@ -181,7 +297,7 @@ def game_name(content_id: str) -> str:
     return GAME_TITLES.get(normalized, f"未知游戏 ({normalized})" if normalized else "未知游戏")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HTTP 客户端（urllib 替代 requests）
+# HTTP 请求（urllib 替代 requests）
 # ══════════════════════════════════════════════════════════════════════════════
 
 class HTTPResponse:
@@ -241,6 +357,7 @@ class HTTPClient:
             return HTTPResponse(e, body, url, str(e))
         except (urllib.error.URLError, socket.timeout, OSError) as e:
             err_msg = e.reason if hasattr(e, 'reason') else str(e)
+            # 仍然返回一个有效响应对象，让调用方拿到耗时
             elapsed_ms = max(1, int((time.monotonic() - started) * 1000))
             dummy = HTTPResponse(None, b"", url, err_msg)
             dummy._elapsed_ms = elapsed_ms
@@ -524,20 +641,29 @@ def validate_server(raw: Any) -> dict[str, Any]:
     return {"id": server_id, "name": name, "host": host, "port": port, "type": protocol, "region": region}
 
 def load_servers() -> list[dict[str, Any]]:
+    """加载服务器列表。
+    优先读取 servers.json（如果存在），将其中的服务器**追加**到内置 DEFAULT_SERVERS 之后。
+    servers.json 中 id 与内置重复的，以 json 中的配置为准（覆盖内置）。
+    环境变量 SERVERS_FILE 可指定其他路径，此时仅使用该文件、不与内置合并。
+    """
     configured = os.getenv("SERVERS_FILE", "").strip()
     if configured:
+        # 显式指定了外部文件 → 仅使用该文件
         path = Path(configured).expanduser()
         if not path.is_file():
             raise SystemExit(f"指定的服务器配置文件不存在：{path}")
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
+            print(f"[配置] 已读取 {path}")
         except (OSError, json.JSONDecodeError) as exc:
             raise SystemExit(f"无法读取服务器配置 {path}：{exc}") from exc
         if not isinstance(raw, list) or not raw:
             raise SystemExit("服务器配置必须是非空 JSON 数组")
         servers = [validate_server(item) for item in raw]
     else:
+        # 默认路径：同目录下的 servers.json
         path = Path(__file__).with_name("servers.json")
+        # 先拷贝内置列表
         merged: dict[str, dict] = {s["id"]: dict(s) for s in DEFAULT_SERVERS}
         if path.is_file():
             try:
@@ -549,10 +675,11 @@ def load_servers() -> list[dict[str, Any]]:
                 raise SystemExit("servers.json 必须是 JSON 数组")
             for item in extra:
                 srv = validate_server(item)
-                merged[srv["id"]] = srv
+                merged[srv["id"]] = srv  # 同 id 覆盖内置
         else:
             print(f"[配置] 未找到 {path}，使用内置服务器列表（{len(merged)} 个）")
         servers = list(merged.values())
+    # id 唯一性检查
     ids = [item["id"] for item in servers]
     if len(ids) != len(set(ids)):
         raise SystemExit("服务器配置中存在重复 id")
@@ -633,15 +760,10 @@ def scan_graphql(server: dict[str, Any]) -> dict[str, Any]:
         idle = int_or_zero(info.get("idle"))
         raw_rooms = data.get("room") if isinstance(data.get("room"), list) else []
         rooms = [normalize_room(item, server, i + 1) for i, item in enumerate(raw_rooms)]
-        result.update({
-            "status": "online",
-            "online": online,
-            "idle": idle,
-            "active": max(0, online - idle),
-            "room_count": len(rooms),
-            "rooms": rooms,
-        })
+        result.update({"status": "online", "online": online, "idle": idle,
+                       "active": max(0, online - idle), "room_count": len(rooms), "rooms": rooms})
     except Exception as exc:
+        # ✅ 即使失败也记录延迟，前端永远有值
         if result["latency_ms"] is None:
             result["latency_ms"] = max(1, int((time.monotonic() - started) * 1000))
         result["error"] = str(exc)
@@ -665,14 +787,8 @@ def scan_rest(server: dict[str, Any]) -> dict[str, Any]:
         idle = int_or_zero(data.get("idle", 0))
         raw_rooms = data.get("rooms") if isinstance(data.get("rooms"), list) else []
         rooms = [normalize_room(item, server, i + 1) for i, item in enumerate(raw_rooms)]
-        result.update({
-            "status": "online",
-            "online": online,
-            "idle": idle,
-            "active": max(0, online - idle),
-            "room_count": len(rooms),
-            "rooms": rooms,
-        })
+        result.update({"status": "online", "online": online, "idle": idle,
+                       "active": max(0, online - idle), "room_count": len(rooms), "rooms": rooms})
     except Exception as exc:
         if result["latency_ms"] is None:
             result["latency_ms"] = max(1, int((time.monotonic() - started) * 1000))
@@ -699,12 +815,10 @@ def scan_server(server: dict[str, Any], force: bool = False) -> tuple[dict[str, 
     result["detection"] = "active-udp-scan+monitor-api"
     if rooms and result.get("status") != "online":
         result["status"] = "online"
-        result["online"] = max(
-            int_or_zero(result.get("online")),
-            sum(max(1, r["node_count"]) for r in rooms),
-        )
+        result["online"] = max(int_or_zero(result.get("online")), sum(max(1, r["node_count"]) for r in rooms))
         result["active"] = max(0, result["online"] - int_or_zero(result.get("idle")))
         result["error"] = ""
+    # ✅ 最终兜底：绝不让 latency_ms 为 None
     if result.get("latency_ms") is None:
         result["latency_ms"] = -1
     cache.set(key, result)
@@ -766,7 +880,7 @@ def make_json_response(data: dict[str, Any], cache_hit: bool = False,
     return body, headers, status
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 前端页面（完整保留）
+# 前端页面（已删除两片区域 + 延迟永不丢失）
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAGE_HTML = r"""<!doctype html>
@@ -774,149 +888,711 @@ PAGE_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#dff3ff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1923" media="(prefers-color-scheme: dark)">
   <title>Direct LDN</title>
   <style>
     :root{
-      --bg:#dff3ff;--card:rgba(255,255,255,.82);--ink:#0c3154;--muted:#50728d;
-      --cyan:#19c8ae;--red:#dc3048;--green:#178a78;--orange:#e8820c;
+      --bg:#dff3ff;--card:rgba(255,255,255,.82);--white:#fff;--ink:#0c3154;--muted:#50728d;
+      --blue:#d8effd;--cyan:#19c8ae;--red:#dc3048;--line:rgba(55,130,175,.12);
+      --shadow:0 16px 44px rgba(65,136,178,.11);
+      --green:#178a78;--green-bg:#dcf6f1;--orange:#e8820c;
       --radius-lg:28px;--radius-md:20px;--radius-sm:14px;
       --font:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+      --transition:all .25s cubic-bezier(.4,0,.2,1);
     }
     @media (prefers-color-scheme: dark){
       :root{
-        --bg:#0f1923;--card:rgba(22,34,46,.85);--ink:#e0eef8;--muted:#7a9bb5;
-        --green:#3dd9b8;--green-bg:rgba(61,217,184,.12);
+        --bg:#0f1923;--card:rgba(22,34,46,.85);--white:#16222e;--ink:#e0eef8;
+        --muted:#7a9bb5;--blue:#1a3344;--cyan:#2ee6c8;--red:#ff5a6e;
+        --line:rgba(255,255,255,.06);--shadow:0 16px 44px rgba(0,0,0,.4);
+        --green:#3dd9b8;--green-bg:rgba(61,217,184,.12);--orange:#ffb347;
       }
     }
     *,*::before,*::after{box-sizing:border-box}
-    body{margin:0;min-height:100vh;font-family:var(--font);background:var(--bg);color:var(--ink)}
-    .page{width:min(1100px,calc(100%-32px));margin:auto;padding:24px 0}
-    .glass{border:1px solid rgba(255,255,255,.8);background:var(--card);backdrop-filter:blur(15px)}
-    .hero{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;border-radius:var(--radius-lg)}
-    .brand{display:flex;align-items:center;gap:12px}
-    .logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#fff970,#ffd626);font-size:20px}
-    .scan{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px}
-    .dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);animation:pulse-dot 2s ease-in-out infinite}
-    .refresh{border:0;border-radius:12px;padding:10px 18px;background:#e1f1fa;font-weight:750;cursor:pointer;display:inline-flex;gap:6px}
+    html{background:var(--bg);scroll-behavior:smooth}
+    body{
+      margin:0;min-height:100vh;color:var(--ink);font-family:var(--font);
+      background:radial-gradient(circle at 8% 6%,rgba(255,255,255,.9),transparent 25%),
+                 radial-gradient(circle at 92% 42%,rgba(176,224,252,.55),transparent 28%),
+                 linear-gradient(180deg,#e4f5ff,#d9f0ff);
+      transition:background .4s ease,color .4s ease;
+      -webkit-tap-highlight-color:transparent;overflow-x:hidden;
+    }
+    @media (prefers-color-scheme: dark){
+      body{background:radial-gradient(circle at 8% 6%,rgba(30,55,75,.6),transparent 25%),
+                        radial-gradient(circle at 92% 42%,rgba(20,45,65,.5),transparent 28%),
+                        linear-gradient(180deg,#0f1923,#0a1218)}
+    }
+    a{color:inherit;text-decoration:none}
+    button{font:inherit}
+    ::selection{background:var(--cyan);color:#fff}
+
+    .page{width:min(1100px,calc(100%-32px));margin:auto;padding:24px 0 24px;animation:fadeIn .5s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .glass{border:1px solid rgba(255,255,255,.8);background:var(--card);box-shadow:var(--shadow);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);transition:var(--transition)}
+    @media (prefers-color-scheme: dark){.glass{border-color:rgba(255,255,255,.05)}}
+
+    /* hero：品牌 + 实时扫描 + 刷新按钮 */
+    .hero{margin-top:0;min-height:68px;border-radius:var(--radius-lg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:12px;z-index:100}
+    .brand{display:flex;align-items:center;gap:12px;min-width:0;flex-shrink:0}
+    .logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#fff970,#ffd626);box-shadow:inset 0 0 0 2px rgba(255,255,255,.7),0 4px 12px rgba(255,200,40,.25);font-size:20px;animation:pulse 3s ease-in-out infinite;flex-shrink:0}
+    @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+    .brand strong{display:block;font:italic 700 22px Georgia,serif;letter-spacing:.3px}
+    .brand small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 6px rgba(25,200,174,.13);animation:pulse-dot 2s ease-in-out infinite}
+    @keyframes pulse-dot{0%,100%{box-shadow:0 0 0 6px rgba(25,200,174,.13)}50%{box-shadow:0 0 0 10px rgba(25,200,174,.06)}}
+    .scan{display:flex;align-items:center;gap:10px;color:var(--muted);font-weight:700;font-size:13px;flex-shrink:0}
+    .refresh{border:0;border-radius:12px;padding:10px 18px;background:#e1f1fa;color:var(--ink);font-weight:750;cursor:pointer;font-size:13.5px;transition:var(--transition);display:inline-flex;align-items:center;gap:6px}
+    .refresh:hover{background:#cce9f9;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    .refresh:active{transform:translateY(0)}
+    .refresh.loading{pointer-events:none;opacity:.7}
+    .refresh .spinner{width:14px;height:14px;border:2.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;display:none}
+    .refresh.loading .spinner{display:block}
+    .refresh.loading .refresh-text::before{content:'刷新中'}
+    .refresh.loading .refresh-text span{display:none}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
     .overview{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
-    .ov-card{padding:18px 16px;background:var(--card);border-radius:var(--radius-md);text-align:center}
+    .ov-card{padding:18px 16px;background:var(--white);border-radius:var(--radius-md);box-shadow:0 6px 20px rgba(82,142,178,.06);text-align:center;transition:var(--transition)}
+    .ov-card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(82,142,178,.1)}
+    .ov-card span{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-bottom:3px}
     .ov-card b{font-size:26px;font-weight:900}
-    .server-list{margin-top:18px;display:grid;gap:12px}
-    .server-group{background:var(--card);border-radius:var(--radius-md);overflow:hidden}
-    .server-head{display:flex;align-items:center;gap:14px;padding:18px 22px;cursor:pointer}
-    .server-status-dot{width:12px;height:12px;border-radius:50%}
-    .server-status-dot.online{background:var(--green)}
-    .server-status-dot.offline{background:var(--red)}
-    .latency-badge{font-size:11px;padding:3px 8px;border-radius:8px}
-    .latency-badge.fast{background:var(--green-bg);color:var(--green)}
-    .latency-badge.error{background:var(--red);color:#fff}
-    .chevron{transition:transform .25s}
-    .server-group.open .chevron{transform:rotate(180deg)}
-    .server-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s}
+    .ov-card.online b{color:#2b8a6f}.ov-card.idle b{color:#b8860b}.ov-card.rooms b{color:#1a73c0}.ov-card.servers b{color:#6f42c1}
+    @media (prefers-color-scheme: dark){.ov-card.online b{color:#3dd9b8}.ov-card.idle b{color:#ffb347}.ov-card.rooms b{color:#7ab8ff}.ov-card.servers b{color:#c4a7ff}}
+
+    .server-list{margin-top:18px;display:grid;gap:12px;contain:layout style}
+    .server-group{
+      background:var(--white);border-radius:var(--radius-md);box-shadow:0 6px 20px rgba(82,142,178,.06);
+      overflow:hidden;will-change:transform;contain:layout style paint;
+    }
+    .server-group:hover{box-shadow:0 10px 30px rgba(82,142,178,.1)}
+
+    .server-head{
+      display:flex;align-items:center;gap:14px;padding:18px 22px;cursor:pointer;
+      user-select:none;position:relative;-webkit-tap-highlight-color:transparent;
+      touch-action:manipulation;
+    }
+    .server-head:hover{background:rgba(125,175,210,.06)}
+    @media (prefers-color-scheme: dark){.server-head:hover{background:rgba(255,255,255,.03)}}
+
+    .server-status-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;position:relative}
+    .server-status-dot.online{background:#19c8ae;box-shadow:0 0 0 4px rgba(25,200,174,.15)}
+    .server-status-dot.offline{background:#dc3048;box-shadow:0 0 0 4px rgba(220,48,72,.12)}
+    .server-status-dot.checking{background:#e8820c;box-shadow:0 0 0 4px rgba(232,130,12,.12);animation:pulse-dot 1.5s ease-in-out infinite}
+
+    .server-info{flex:1;min-width:0}
+    .server-name{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .server-name .region{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(125,175,210,.12);color:var(--muted)}
+    .server-detail{font-size:12.5px;color:var(--muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .addr-text{cursor:pointer;user-select:all;transition:color .2s,background .2s;padding:1px 6px;border-radius:6px}
+    .addr-text:hover{color:var(--ink);background:rgba(125,175,210,.12)}
+    .addr-text:active{background:rgba(25,200,174,.15)}
+    .addr-copied{color:#19c8ae!important;background:rgba(25,200,174,.12)!important}
+
+    .server-stats{display:flex;gap:16px;align-items:center;flex-shrink:0}
+    .server-stats .stat-item{text-align:center}
+    .server-stats .stat-item span{display:block;font-size:10.5px;color:var(--muted);font-weight:600}
+    .server-stats .stat-item b{font-size:18px;font-weight:900;line-height:1.2}
+    .stat-item.online b{color:#2b8a6f} .stat-item.idle b{color:#b8860b} .stat-item.rooms b{color:#1a73c0}
+    @media (prefers-color-scheme: dark){.stat-item.online b{color:#3dd9b8}.stat-item.idle b{color:#ffb347}.stat-item.rooms b{color:#7ab8ff}}
+
+    .latency-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;white-space:nowrap}
+    .latency-badge.fast{color:#17776b;background:#dcf6f1}
+    .latency-badge.slow{color:#a52639;background:#fff0f2}
+    .latency-badge.normal{color:#555;background:rgba(125,175,210,.1)}
+    .latency-badge.error{color:#fff;background:#dc3048;font-weight:800;padding:3px 10px}
+    @media (prefers-color-scheme: dark){.latency-badge.fast{color:#3dd9b8;background:rgba(61,217,184,.12)}.latency-badge.slow{color:#ff5a6e;background:rgba(255,90,110,.12)}.latency-badge.normal{color:var(--muted);background:rgba(255,255,255,.06)}.latency-badge.error{color:#fff;background:#ff5a6e}}
+
+    .chevron{
+      width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+      background:rgba(125,175,210,.1);color:var(--muted);font-size:14px;font-weight:900;
+      transition:transform .25s cubic-bezier(.4,0,.2,1);flex-shrink:0;
+      will-change:transform;
+    }
+    .server-group.open .chevron{transform:rotate(180deg);background:rgba(97,194,233,.18);color:#0c5d91}
+    @media (prefers-color-scheme: dark){.server-group.open .chevron{color:#7dd3fc}}
+
+    .server-body{
+      display:grid;grid-template-rows:0fr;overflow:hidden;
+      transition:grid-template-rows .3s cubic-bezier(.4,0,.2,1);
+    }
+    .server-body > .body-inner{overflow:hidden;min-height:0}
     .server-group.open .server-body{grid-template-rows:1fr}
-    .room-list{padding:0 22px 20px;display:grid;gap:10px}
-    .room-item{padding:16px;border-radius:16px;background:var(--card)}
-    .room-host{font-size:16px;font-weight:800}
-    .room-game{font-size:12px;padding:4px 12px;border-radius:999px;background:#e9f5fb}
+    .server-group.open .server-body > .body-inner{padding:0 22px 20px}
+
+    .server-error{padding:14px 18px;border-radius:14px;background:#fff0f2;color:#a52639;font-size:13px;font-weight:600;margin-top:4px;display:flex;align-items:center;gap:8px}
+    @media (prefers-color-scheme: dark){.server-error{background:rgba(255,90,110,.08);color:#ff5a6e}}
+
+    .room-list{display:grid;gap:10px;margin-top:8px}
+    .room-item{
+      padding:16px 18px;border-radius:16px;background:var(--card);
+      box-shadow:0 4px 14px rgba(82,142,178,.05);transition:transform .15s ease,box-shadow .15s ease;
+      contain:layout style paint;
+    }
+    .room-item:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(82,142,178,.09)}
+    .room-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+    .room-host{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px}
+    .room-host::before{content:'🏠';font-size:15px}
+    .room-game{font-size:12.5px;padding:4px 12px;border-radius:999px;background:#e9f5fb;color:#326887;font-weight:700;white-space:nowrap}
+    @media (prefers-color-scheme: dark){.room-game{background:rgba(97,194,233,.12);color:#7dd3fc}}
+    .room-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:13px;color:#376482;font-weight:600}
+    .room-meta .green{color:var(--green);font-weight:750}
+    .room-meta .red{color:var(--red);font-weight:800}
     .room-players{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-    .player{padding:3px 10px;border-radius:999px;background:var(--green-bg);font-size:11px}
-    .filters{display:flex;gap:8px;overflow-x:auto;padding:14px 0 4px}
-    .filter-tab{border:0;border-radius:999px;padding:9px 18px;background:#e8f3f9;font-weight:700;cursor:pointer}
-    .filter-tab.active{background:#cde9fa;color:#0c5d91}
-    footer{text-align:center;padding:24px;font-size:12px;color:var(--muted)}
+    .room-players .player{padding:3px 10px;border-radius:999px;background:var(--green-bg);color:#17776b;font-size:11.5px;font-weight:600}
+    @media (prefers-color-scheme: dark){.room-players .player{background:rgba(61,217,184,.12);color:#3dd9b8}}
+
+    .no-rooms{padding:20px;text-align:center;color:var(--muted);font-size:13px;background:rgba(125,175,210,.04);border-radius:14px;margin-top:8px}
+    .no-rooms-match{padding:14px 18px;text-align:center;color:var(--muted);font-size:12.5px;background:rgba(125,175,210,.03);border-radius:12px;margin-top:6px}
+
+    .skeleton{height:60px;border-radius:14px;background:linear-gradient(100deg,#f0f6fa 20%,#e2eef5 38%,#f0f6fa 56%);background-size:300% 100%;animation:shine 1.4s infinite;margin-top:8px}
+    @media (prefers-color-scheme: dark){.skeleton{background:linear-gradient(100deg,#1a2530 20%,#243240 38%,#1a2530 56%);background-size:300% 100%}}
+    @keyframes shine{to{background-position-x:-100%}}
+
+    .filters{display:flex;gap:8px;overflow-x:auto;padding:14px 0 4px;scrollbar-width:none}
+    .filters::-webkit-scrollbar{display:none}
+    .filter-tab{flex:0 0 auto;border:0;border-radius:999px;padding:9px 18px;background:#e8f3f9;color:var(--ink);font-weight:700;cursor:pointer;font-size:13px;transition:var(--transition);white-space:nowrap}
+    .filter-tab:hover{background:#d8eaf3}
+    .filter-tab.active{background:#cde9fa;color:#0c5d91;font-weight:800;box-shadow:0 2px 8px rgba(97,194,233,.25)}
+    @media (prefers-color-scheme: dark){.filter-tab{background:rgba(255,255,255,.06)}.filter-tab:hover{background:rgba(255,255,255,.10)}.filter-tab.active{background:rgba(97,194,233,.20);color:#7dd3fc}}
+
+    /* footer 已精简：只保留版权行 */
+    footer{text-align:center;padding:24px 16px 8px;color:#55758c;font-size:12px;line-height:1.9;margin-top:12px}
+    @media (prefers-color-scheme: dark){footer{color:var(--muted)}}
+
+    @media (max-width:900px){
+      .page{width:calc(100% - 20px);padding-top:14px}
+      .hero{border-radius:20px;padding:10px 14px;gap:10px}
+      .brand{min-width:auto;flex-shrink:0}.brand strong{font-size:18px}
+      .scan{font-size:12px;flex-shrink:0}
+      .overview{grid-template-columns:repeat(4,1fr);gap:8px}
+      .ov-card{padding:14px 8px}
+      .ov-card b{font-size:22px}
+      .server-head{padding:14px 16px;gap:10px}
+      .server-stats{gap:10px}
+      .server-name{font-size:14.5px}
+    }
+
+    @media (max-width:600px){
+      .page{width:calc(100% - 14px);padding:10px 0 16px}
+      .hero{border-radius:16px;padding:8px 10px;gap:6px;position:sticky;top:6px}
+      .brand{flex-shrink:0}
+      .brand strong{font-size:15px}
+      .brand small{display:none}
+      .logo{width:34px;height:34px;border-radius:10px;font-size:16px}
+      .scan{margin-top:0;font-size:11.5px;flex-shrink:0}
+      .scan .refresh{flex:0 0 auto;padding:7px 12px;font-size:12px}
+      .overview{grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}
+      .ov-card{padding:12px 8px;border-radius:14px}
+      .ov-card b{font-size:20px}
+      .ov-card span{font-size:11px}
+      .server-list{margin-top:14px;gap:10px}
+      .server-head{padding:12px 14px;gap:8px;flex-wrap:nowrap}
+      .server-status-dot{width:10px;height:10px}
+      .server-name{font-size:13.5px;gap:5px}
+      .server-name .region{font-size:10px;padding:1px 6px}
+      .server-detail{font-size:11px;gap:6px;margin-top:2px}
+      .server-stats{gap:8px}
+      .server-stats .stat-item span{font-size:9.5px}
+      .server-stats .stat-item b{font-size:15px}
+      .latency-badge{font-size:10px;padding:2px 6px}
+      .chevron{width:24px;height:24px;font-size:12px}
+      .server-group.open .server-body{padding:0 14px 14px}
+      .room-list{gap:8px}
+      .room-item{padding:14px;border-radius:14px}
+      .room-host{font-size:14.5px}
+      .room-game{font-size:11px;padding:3px 10px}
+      .room-meta{font-size:12px;gap:6px}
+      .room-players{gap:4px}
+      .room-players .player{padding:2px 8px;font-size:10.5px}
+      .filters{padding:10px 0 2px}
+      .filter-tab{padding:7px 14px;font-size:12px}
+    }
+
+    @media (max-width:380px){
+      .brand small{display:none}
+      .brand strong{font-size:14px}
+      .logo{width:30px;height:30px;font-size:14px}
+      .scan{font-size:10.5px;gap:6px}
+      .scan .refresh{padding:6px 10px;font-size:11px}
+      .server-detail .addr-text{display:none}
+      .server-stats .stat-item.idle{display:none}
+    }
+
+    @media (prefers-reduced-motion:reduce){
+      *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    }
   </style>
 </head>
 <body>
 <div class="page">
   <section class="hero glass">
-    <div class="brand"><div class="logo">🎮</div><div><strong>Direct LDN</strong><small>独立 LAN-Play 监控</small></div></div>
-    <div class="scan"><div class="dot"></div><span>实时扫描</span>
-      <button id="refreshBtn" class="refresh">刷新</button>
+    <a class="brand" href="/"><span class="logo">🎮</span><span><strong>Direct LDN</strong><small>独立 LAN-Play 监控</small></span></a>
+    <div class="scan">
+      <i class="dot"></i><span>实时扫描</span>
+      <button id="refreshBtn" class="refresh">
+        <span class="spinner"></span>
+        <span class="refresh-text"><span>刷新</span></span>
+      </button>
     </div>
   </section>
 
-  <div class="overview">
-    <div class="ov-card"><span>在线服务器</span><b id="ovServers">—</b></div>
-    <div class="ov-card"><span>总在线</span><b id="ovOnline">—</b></div>
-    <div class="ov-card"><span>空闲</span><b id="ovIdle">—</b></div>
-    <div class="ov-card"><span>总房间</span><b id="ovRooms">—</b></div>
+  <div class="overview" id="overview">
+    <div class="ov-card servers"><span>在线服务器</span><b id="ovServers">—</b></div>
+    <div class="ov-card online"><span>总在线</span><b id="ovOnline">—</b></div>
+    <div class="ov-card idle"><span>空闲</span><b id="ovIdle">—</b></div>
+    <div class="ov-card rooms"><span>总房间</span><b id="ovRooms">—</b></div>
   </div>
 
   <div class="filters" id="filters"></div>
-  <div class="server-list" id="serverList"></div>
-  <footer>Direct LDN · LAN-Play / ldn_mitm 监控</footer>
+
+  <div class="server-list" id="serverList">
+    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+  </div>
+
 </div>
 
 <script>
 (() => {
-  const state = { servers:[], rooms:[], game:'all', expanded:new Set() };
+  'use strict';
+  const state = { servers:[], rooms:[], game:'all', expanded:new Set(), loading:false, firstLoad:true, firstExpand:true };
   const $ = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-  async function load(){
-    const r = await fetch('/api/snapshot?_=' + Date.now());
-    const d = await r.json();
-    state.servers = d.servers || [];
-    state.rooms = d.rooms || [];
-    render();
+  async function getJSON(url){
+    const r = await fetch(url, { headers:{ Accept:'application/json' }, cache:'no-store' });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok || d.ok === false) throw new Error(d.error || `请求失败 (${r.status})`);
+    return d;
   }
 
-  function render(){
-    $('ovServers').textContent = state.servers.filter(s=>s.status==='online').length + '/' + state.servers.length;
-    $('ovOnline').textContent = state.servers.reduce((a,s)=>a+(s.online||0),0);
-    $('ovIdle').textContent = state.servers.reduce((a,s)=>a+(s.idle||0),0);
+  const statusDot = s => s==='online' ? 'online' : s==='checking' ? 'checking' : 'offline';
+
+  // 复制到剪贴板 + 视觉反馈
+  function copyAddr(text, el){
+    const done = () => {
+      el.classList.add('addr-copied');
+      const original = el.textContent;
+      el.textContent = '✅ 已复制 ' + text;
+      setTimeout(() => {
+        el.classList.remove('addr-copied');
+        el.textContent = original;
+      }, 1500);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+  function fallbackCopy(text, cb){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta);
+    cb && cb();
+  }
+
+  // ✅ 延迟显示：离线显示 ! 错误，在线按数值分色
+  function latencyHTML(s){
+    // 离线 / 错误 → 显示 "! 错误"
+    if(s.status !== 'online' || s.error || s.latency_ms == null || s.latency_ms < 0){
+      return '<span class="latency-badge error">! 错误</span>';
+    }
+    const lat = s.latency_ms;
+    if(lat < 100){
+      return `<span class="latency-badge fast">${lat}ms</span>`;
+    } else if(lat > 300){
+      return `<span class="latency-badge slow">${lat}ms</span>`;
+    } else {
+      return `<span class="latency-badge normal">${lat}ms</span>`;
+    }
+  }
+
+  function roomCard(room){
+    const players = Array.isArray(room.players) ? room.players : [];
+    const count = `${room.node_count||players.length}${room.node_count_max?' / '+room.node_count_max:''} 人`;
+    const gameVal = String(room.game || '');
+    return `<div class="room-item" data-game="${gameVal}">
+      <div class="room-top">
+        <div class="room-host">${esc(room.host||'未知房间')}</div>
+        <span class="room-game">${esc(room.game)}</span>
+      </div>
+      <div class="room-meta">
+        <span class="green">● 正在联机</span>
+        <span>|</span>
+        <span>${esc(count)}</span>
+        <span>|</span>
+        <span>🖥️ ${esc(room.server_name)}</span>
+      </div>
+      <div class="room-players">${players.map(p=>`<span class="player">${esc(p)}</span>`).join('')}</div>
+    </div>`;
+  }
+
+  function applyFilter(autoExpand){
+    if(autoExpand === undefined) autoExpand = false;
+    const g = state.game;
+    const isAll = (g === 'all');
+    const isAllServers = (g === 'all_servers');
+
+    const filteredRooms = isAllServers ? state.rooms : (isAll ? state.rooms : state.rooms.filter(r => r.game === g));
+    const onlineCount = state.servers.filter(s=>s.status==='online').length;
+    const totalOnline = state.servers.filter(s=>s.status==='online').reduce((a,s)=>a+(s.online||0),0);
+    $('ovServers').textContent = `${onlineCount}/${state.servers.length}`;
+    $('ovOnline').textContent = totalOnline;
+    $('ovIdle').textContent = state.servers.filter(s=>s.status==='online').reduce((a,s)=>a+(s.idle||0),0);
+    $('ovRooms').textContent = filteredRooms.length;
+
+    const allRooms = document.querySelectorAll('.room-item');
+    allRooms.forEach(el => {
+      el.style.display = (isAll || isAllServers || el.dataset.game === g) ? '' : 'none';
+    });
+
+    state.servers.forEach(s => {
+      const group = document.querySelector(`.server-group[data-id="${s.id}"]`);
+      if(!group) return;
+      const items = group.querySelectorAll('.room-item');
+      let visible = 0;
+      items.forEach(el => { if(el.style.display !== 'none') visible++; });
+
+      const isOnline = s.status === 'online' && !s.error;
+
+      if(isAllServers){
+        group.style.display = '';
+        if(autoExpand && !group.classList.contains('open')){
+          group.classList.add('open');
+          state.expanded.add(s.id);
+        }
+        group.querySelectorAll('.no-rooms, .no-rooms-empty, .no-rooms-match').forEach(el => el.remove());
+        if(items.length === 0 && isOnline){
+          let emptyMsg = group.querySelector('.no-rooms-empty');
+          if(!emptyMsg){
+            emptyMsg = document.createElement('div');
+            emptyMsg.className = 'no-rooms-empty no-rooms';
+            emptyMsg.textContent = '📭 该服务器暂无公开房间';
+            const body = group.querySelector('.server-body > .body-inner');
+            if(body) body.appendChild(emptyMsg);
+          }
+          emptyMsg.style.display = '';
+        }
+      } else if(isAll){
+        const hasAnyRooms = items.length > 0;
+        group.style.display = (hasAnyRooms && isOnline) ? '' : 'none';
+        if(autoExpand && hasAnyRooms && !group.classList.contains('open')){
+          group.classList.add('open');
+          state.expanded.add(s.id);
+        }
+        group.querySelectorAll('.no-rooms, .no-rooms-empty, .no-rooms-match').forEach(el => el.remove());
+      } else {
+        if(visible > 0 && isOnline){
+          group.style.display = '';
+          if(autoExpand && !group.classList.contains('open')){
+            group.classList.add('open');
+            state.expanded.add(s.id);
+          }
+          group.querySelectorAll('.no-rooms, .no-rooms-empty, .no-rooms-match').forEach(el => el.remove());
+        } else {
+          group.style.display = 'none';
+        }
+        group.querySelectorAll('.no-rooms, .no-rooms-empty').forEach(el => el.style.display = 'none');
+      }
+    });
+
+    const visibleGroups = document.querySelectorAll('.server-group:not([style*="display: none"])');
+    let globalMsg = document.getElementById('no-server-match');
+    if(!isAll && !isAllServers && visibleGroups.length === 0){
+      if(!globalMsg){
+        globalMsg = document.createElement('div');
+        globalMsg.id = 'no-server-match';
+        globalMsg.className = 'no-rooms';
+        globalMsg.style.cssText = 'text-align:center;padding:24px;font-size:14px;';
+        globalMsg.textContent = `🔍 没有服务器有游戏「${g}」的房间`;
+        $('serverList').appendChild(globalMsg);
+      }
+      globalMsg.textContent = `🔍 没有服务器有游戏「${g}」的房间`;
+      globalMsg.style.display = '';
+    } else if(globalMsg){
+      globalMsg.style.display = 'none';
+    }
+  }
+
+  function renderServers(){
+    const list = $('serverList');
+    const roomsByServer = {};
+    state.rooms.forEach(r => { (roomsByServer[r.server_id] = roomsByServer[r.server_id] || []).push(r); });
+
+    const onlineCount = state.servers.filter(s => s.status==='online').length;
+    const totalOnline = state.servers.filter(s=>s.status==='online').reduce((a,s)=>a+(s.online||0),0);
+    const totalIdle = state.servers.filter(s=>s.status==='online').reduce((a,s)=>a+(s.idle||0),0);
+    $('ovServers').textContent = `${onlineCount}/${state.servers.length}`;
+    $('ovOnline').textContent = totalOnline;
+    $('ovIdle').textContent = totalIdle;
     $('ovRooms').textContent = state.rooms.length;
 
-    const list = $('serverList');
-    list.innerHTML = '';
-    state.servers.forEach(s => {
-      const el = document.createElement('div');
-      el.className = 'server-group' + (state.expanded.has(s.id)?' open':'');
-      el.innerHTML = `
-        <div class="server-head">
-          <div class="server-status-dot ${s.status}"></div>
-          <div style="flex:1"><strong>${s.name}</strong><br><small>${s.address}</small></div>
-          <div class="latency-badge ${s.latency_ms<100?'fast':s.latency_ms>300?'slow':'normal'}">
-            ${s.latency_ms>=0?s.latency_ms+'ms':'! 错误'}
-          </div>
-          <div class="chevron">⌄</div>
-        </div>
-        <div class="server-body">
-          <div class="room-list">
-            ${(s.rooms||[]).map(r=>`
-              <div class="room-item">
-                <div class="room-host">${r.host}</div>
-                <div class="room-game">${r.game}</div>
-                <div class="room-players">
-                  ${r.players.map(p=>`<span class="player">${p}</span>`).join('')}
-                </div>
+    if(!state.servers.length){
+      if(state.firstLoad){ list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>'; }
+      return;
+    }
+
+    const existing = state._domCache || (state._domCache = new Map());
+    if(existing.size === 0){
+      list.querySelectorAll('.server-group').forEach(el => { existing.set(el.dataset.id, el); });
+    }
+
+    const order = [];
+
+    state.servers.forEach((s) => {
+      const dot = statusDot(s.status);
+      const rooms = roomsByServer[s.id] || [];
+      const regionTxt = s.region ? `<span class="region">${esc(s.region)}</span>` : '';
+      const errMsg = s.error ? `<div class="server-error">⚠️ ${esc(s.error)}</div>` : '';
+      const roomsHtml = rooms.length
+        ? `<div class="room-list">${rooms.map(r=>roomCard(r)).join('')}</div>`
+        : '';
+
+      let group = existing.get(s.id);
+      if(group){
+        const dotEl = group.querySelector('.server-status-dot');
+        if(dotEl && dotEl.className !== 'server-status-dot '+dot) dotEl.className = 'server-status-dot ' + dot;
+
+        const nameEl = group.querySelector('.server-name');
+        const nameHtml = `${esc(s.name)} ${regionTxt}`;
+        if(nameEl && nameEl.innerHTML !== nameHtml) nameEl.innerHTML = nameHtml;
+
+        const detailEl = group.querySelector('.server-detail');
+        const detailHtml = `<span class="addr-text" title="点击复制地址">${esc(s.address)}</span>${latencyHTML(s)}`;
+        if(detailEl && detailEl.innerHTML !== detailHtml) detailEl.innerHTML = detailHtml;
+        const addrEl = group.querySelector('.addr-text');
+        if(addrEl && !addrEl._copyBound){ addrEl._copyBound=true; addrEl.addEventListener('click', (e)=>{ e.stopPropagation(); copyAddr(s.address, addrEl); }); }
+
+        const statBs = group.querySelectorAll('.stat-item b');
+        if(statBs.length>=3){
+          const vals = [String(s.online||0), String(s.idle||0), String(s.room_count||0)];
+          statBs.forEach((b,i)=>{ if(b.textContent!==vals[i]) b.textContent=vals[i]; });
+        }
+
+        const shouldOpen = state.expanded.has(s.id);
+        const isOpen = group.classList.contains('open');
+        if(shouldOpen !== isOpen) group.classList.toggle('open', shouldOpen);
+
+        const body = group.querySelector('.server-body > .body-inner');
+        if(body){
+          const newBody = errMsg + roomsHtml;
+          if(body.innerHTML !== newBody) body.innerHTML = newBody;
+        }
+
+        const oldMsg = group.querySelector('.no-rooms-match');
+        if(oldMsg) oldMsg.remove();
+      } else {
+        const isOpen = state.expanded.has(s.id) ? 'open' : '';
+        const div = document.createElement('div');
+        div.className = `server-group ${isOpen}`;
+        div.dataset.id = s.id;
+        div.innerHTML = `
+          <div class="server-head">
+            <div class="server-status-dot ${dot}"></div>
+            <div class="server-info">
+              <div class="server-name">${esc(s.name)} ${regionTxt}</div>
+              <div class="server-detail">
+                <span class="addr-text" title="点击复制地址">${esc(s.address)}</span>
+                ${latencyHTML(s)}
               </div>
-            `).join('')}
+            </div>
+            <div class="server-stats">
+              <div class="stat-item online"><span>在线</span><b>${s.online||0}</b></div>
+              <div class="stat-item idle"><span>空闲</span><b>${s.idle||0}</b></div>
+              <div class="stat-item rooms"><span>房间</span><b>${s.room_count||0}</b></div>
+            </div>
+            <div class="chevron">⌄</div>
           </div>
-        </div>`;
-      el.querySelector('.server-head').onclick = () => {
-        state.expanded.has(s.id) ? state.expanded.delete(s.id) : state.expanded.add(s.id);
-        render();
-      };
-      list.appendChild(el);
+          <div class="server-body"><div class="body-inner">
+            ${errMsg}
+            ${roomsHtml}
+          </div></div>`;
+        existing.set(s.id, div);
+        div.querySelector('.server-head').addEventListener('click', (e) => {
+          // 如果点击的是地址，不触发展开/折叠
+          if(e.target.closest('.addr-text')) return;
+          const id = div.dataset.id;
+          if(state.expanded.has(id)){ state.expanded.delete(id); div.classList.remove('open'); }
+          else { state.expanded.add(id); div.classList.add('open'); }
+        });
+        const addrEl = div.querySelector('.addr-text');
+        if(addrEl){ addrEl.addEventListener('click', (e) => { e.stopPropagation(); copyAddr(s.address, addrEl); }); }
+      }
+      order.push(existing.get(s.id));
+    });
+
+    existing.forEach((el, id) => { if(!state.servers.find(s=>s.id===id)){ el.remove(); existing.delete(id); } });
+
+    if(state.firstLoad || list.children.length === 0){
+      list.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      order.forEach(el => frag.appendChild(el));
+      list.appendChild(frag);
+      state.firstLoad = false;
+    } else {
+      const current = Array.from(list.children);
+      let changed = current.length !== order.length;
+      if(!changed){ for(let i=0;i<current.length;i++){ if(current[i]!==order[i]){ changed=true; break; } } }
+      if(changed){
+        const frag = document.createDocumentFragment();
+        order.forEach(el => frag.appendChild(el));
+        list.appendChild(frag);
+      }
+    }
+  }
+
+  function renderFilters(){
+    const games = [...new Set(state.rooms.map(r => r.game).filter(Boolean))];
+    const tabs = ['all_servers', 'all', ...games.slice(0,10)];
+    const container = $('filters');
+    const existing = container.children;
+
+    while(existing.length < tabs.length){
+      const btn = document.createElement('button');
+      btn.className = 'filter-tab';
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.game = btn.dataset.game;
+
+        if(state.game === 'all_servers'){
+          state.servers.forEach(s => {
+            const group = document.querySelector(`.server-group[data-id="${s.id}"]`);
+            if(!group) return;
+            const hasRooms = (s.room_count || 0) > 0;
+            if(hasRooms){
+              if(!group.classList.contains('open')){
+                group.classList.add('open');
+                state.expanded.add(s.id);
+              }
+            } else {
+              group.classList.remove('open');
+              state.expanded.delete(s.id);
+            }
+          });
+          applyFilter(false);
+        } else {
+          applyFilter(true);
+        }
+      });
+      container.appendChild(btn);
+    }
+    while(existing.length > tabs.length){ existing[existing.length-1].remove(); }
+
+    tabs.forEach((g, i) => {
+      const btn = existing[i];
+      let label;
+      if(g === 'all'){
+        label = `总房间 (${state.rooms.length})`;
+      } else if(g === 'all_servers'){
+        label = `全部 (${state.servers.length})`;
+      } else {
+        label = esc(g);
+      }
+      btn.dataset.game = g;
+      btn.textContent = label;
+      const active = (g === 'all' && state.game === 'all')
+                  || (g === 'all_servers' && state.game === 'all_servers')
+                  || (g !== 'all' && g !== 'all_servers' && state.game === g);
+      btn.classList.toggle('active', active);
     });
   }
 
-  $('refreshBtn').onclick = () => load();
+  function render(data){
+    state.servers = Array.isArray(data.servers) ? data.servers : [];
+    state.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+
+    if(state.firstExpand){
+      state.game = 'all_servers';
+      state.firstExpand = false;
+    }
+
+    if(state.game === 'all_servers'){
+      state.servers.forEach(s => {
+        const hasRooms = (s.room_count || 0) > 0;
+        if (hasRooms) {
+          state.expanded.add(s.id);
+        } else {
+          state.expanded.delete(s.id);
+        }
+      });
+    }
+
+    requestAnimationFrame(() => {
+      renderFilters();
+      renderServers();
+      applyFilter(false);
+    });
+  }
+
+  async function load(force=false){
+    if(state.loading) return;
+    state.loading = true;
+    const btn = $('refreshBtn');
+    btn.classList.add('loading');
+    try{
+      const url = '/api/snapshot?refresh=' + (force?'1':'0') + '&_=' + Date.now();
+      const data = await getJSON(url);
+      await new Promise(res => requestAnimationFrame(res));
+      render(data);
+      if(btn){ btn.classList.remove('loading'); btn.classList.add('success'); btn.querySelector('.refresh-text').innerHTML='<span>✓ 已刷新</span>'; setTimeout(()=>{btn.classList.remove('success');}, 1200); }
+    }catch(e){
+      btn.classList.remove('loading');
+    }finally{
+      state.loading = false;
+      scheduleRefresh();
+    }
+  }
+
+  let refreshTimer = null;
+  function scheduleRefresh(){
+    if(refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { load(false); }, 10000);
+  }
+
+  $('refreshBtn').addEventListener('click', ()=>{
+    if(refreshTimer) clearTimeout(refreshTimer);
+    load(true);
+  });
+
+  document.addEventListener('keydown', e=>{
+    if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+    if(e.key==='r'||e.key==='R'){
+      if(refreshTimer) clearTimeout(refreshTimer);
+      load(true);
+    }
+  });
+
+  let touchStartY=0;
+  document.addEventListener('touchstart',e=>{touchStartY=e.changedTouches[0].screenY},{passive:true});
+  document.addEventListener('touchend',e=>{
+    const dy = touchStartY - e.changedTouches[0].screenY;
+    if(dy < -80 && window.scrollY <= 0){
+      if(refreshTimer) clearTimeout(refreshTimer);
+      load(true);
+    }
+  },{passive:true});
+
+  state.firstLoad = true;
+  state.firstExpand = true;
   load();
-  setInterval(load, 10000);
 })();
 </script>
 </body></html>"""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HTTP 请求处理器
+# HTTP 请求处理器 (http.server)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class MonitorHandler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        print(f"[{self.log_date_time_string()}] {self.address_string()} {fmt % args}")
+    def log_message(self, format: str, *args: Any) -> None:
+        print(f"[{self.log_date_time_string()}] {self.address_string()} {format % args}")
 
-    def _send(self, body, headers, status=200):
+    def _send_response(self, body: bytes, headers: dict[str, str], status: int = 200) -> None:
         self.send_response(status)
         for k, v in headers.items():
             self.send_header(k, v)
@@ -924,42 +1600,95 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False).encode()
-        self._send(body, {"Content-Type": "application/json; charset=utf-8"}, status)
+    def _send_json(self, data: dict[str, Any], cache_hit: bool = False, status: int = 200) -> None:
+        body, headers, status = make_json_response(data, cache_hit, status)
+        self._send_response(body, headers, status)
 
-    def _html(self):
-        self._send(PAGE_HTML.encode(), {"Content-Type": "text/html; charset=utf-8"})
+    def _send_text(self, text: str, content_type: str = "text/plain; charset=utf-8", status: int = 200) -> None:
+        body = text.encode("utf-8")
+        self._send_response(body, {"Content-Type": content_type}, status)
 
-    def do_GET(self):
-        if self.path.startswith("/api/"):
-            q = self.path.split("?", 1)[1] if "?" in self.path else ""
-            query = parse_query(q)
-            if self.path.startswith("/api/snapshot"):
-                servers, _ = scan_all(wants_refresh(query))
-                rooms = [r for s in servers for r in s["rooms"]]
-                self._json({
-                    "ok": True,
-                    "servers": servers,
-                    "rooms": rooms,
-                    "checked_at": utc_now(),
+    def _send_html(self, html: str, status: int = 200) -> None:
+        self._send_text(html, "text/html; charset=utf-8", status)
+
+    def _parse_query(self) -> dict[str, str]:
+        parsed = urllib.parse.urlparse(self.path)
+        self.path = parsed.path
+        return parse_query(parsed.query)
+
+    def do_GET(self) -> None:
+        query = self._parse_query()
+        try:
+            if self.path == "/":
+                self._send_html(PAGE_HTML)
+            elif self.path == "/api/health":
+                self._send_json({
+                    "ok": True, "service": APP_NAME, "time": utc_now(),
+                    "server_count": len(SERVERS),
+                    "source": "direct LAN-Play server queries",
+                    "cache_ttl": CACHE_TTL,
                 })
+            elif self.path == "/api/servers":
+                servers, hit = scan_all(wants_refresh(query))
+                public = [{k: v for k, v in s.items() if k != "rooms"} for s in servers]
+                self._send_json({"ok": True, "items": public, "checked_at": utc_now()}, hit)
+            elif self.path == "/api/dashboard":
+                server_id = query.get("server", SERVERS[0]["id"]).strip()
+                if server_id not in SERVERS_BY_ID:
+                    raise ValueError("server 不在本地服务器配置中")
+                result, hit = scan_server(SERVERS_BY_ID[server_id], wants_refresh(query))
+                self._send_json({"ok": True, **result}, hit)
+            elif self.path == "/api/rooms":
+                page = bounded_int(query, "page", 1, 1, 10000)
+                page_size = bounded_int(query, "page_size", 50, 1, 100)
+                server_filter = query.get("server", "").strip()
+                if server_filter and server_filter not in SERVERS_BY_ID:
+                    raise ValueError("server 不在本地服务器配置中")
+                servers, hit = scan_all(wants_refresh(query))
+                rooms = [r for s in servers if not server_filter or s["id"] == server_filter for r in s["rooms"]]
+                total = len(rooms)
+                total_pages = max(1, (total + page_size - 1) // page_size)
+                page = min(page, total_pages)
+                start = (page - 1) * page_size
+                self._send_json({
+                    "ok": True, "items": rooms[start:start + page_size],
+                    "page": page, "pageSize": page_size, "total": total,
+                    "totalPages": total_pages, "checked_at": utc_now(),
+                }, hit)
+            elif self.path == "/api/snapshot":
+                server_id = query.get("server", "").strip()
+                if server_id and server_id not in SERVERS_BY_ID:
+                    raise ValueError("server 不在本地服务器配置中")
+                servers, hit = scan_all(wants_refresh(query))
+                if not server_id:
+                    server_id = servers[0]["id"] if servers else ""
+                selected = next((s for s in servers if s["id"] == server_id), None)
+                rooms = [r for s in servers for r in s["rooms"]]
+                self._send_json({
+                    "ok": True, "checked_at": utc_now(), "selected": selected,
+                    "servers": servers, "rooms": rooms,
+                    "online_servers": sum(1 for s in servers if s["status"] == "online"),
+                    "total_online": sum(s["online"] for s in servers if s["status"] == "online"),
+                }, hit)
             else:
-                self._json({"ok": False, "error": "API not found"}, 404)
-        else:
-            self._html()
+                self._send_json({"ok": False, "error": "页面或接口不存在"}, status=404)
+        except ValueError as e:
+            self._send_json({"ok": False, "error": str(e)}, status=400)
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, status=500)
 
-    def do_POST(self):
-        self._json({"ok": False, "error": "Method Not Allowed"}, 405)
+    def do_POST(self) -> None:
+        self._send_json({"ok": False, "error": "仅支持 GET 请求"}, status=405)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ 对外 API（供 Kivy / main.py 使用）
+# ✅ 对外 API（供 Kivy / main.py import 使用）
 # ══════════════════════════════════════════════════════════════════════════════
 
 def start_server(host: str | None = None, port: int | None = None) -> HTTPServer:
     """
     非阻塞启动 HTTP Server
-    供 Kivy / Android / 其他框架 import 使用
+    ✅ 供 Kivy / Android / 其他框架 import 调用
+    ✅ 默认 127.0.0.1（Android 安全），可通过参数或环境变量覆盖
     """
     host = host or os.getenv("HOST", "127.0.0.1")
     port = port or int(os.getenv("PORT", "5000"))
@@ -990,28 +1719,46 @@ if __name__ == "__main__":
 
     print(f"[启动] {APP_NAME}")
     print(f"\033[94m[监听] {url}\033[0m")
+    print("\033[93m👉 点击上方链接，或用浏览器打开 👈\033[0m")
 
+    # 使用 start_server() 启动（非阻塞），然后主线程等待
     server = start_server(host=host, port=port)
 
-    def try_open():
+    def try_open_browser() -> None:
+        """尝试自动打开浏览器（Android / Termux / PC）"""
         time.sleep(0.4)
+        # Android
         try:
-            subprocess.run(["am", "start", "--user", "0",
-                           "-a", "android.intent.action.VIEW",
-                           "-d", url], timeout=2)
+            subprocess.run(
+                ["am", "start", "--user", "0",
+                 "-a", "android.intent.action.VIEW",
+                 "-d", url],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            )
+            print("[系统] 已尝试唤起系统浏览器")
             return
         except Exception:
             pass
+        # Termux
         try:
-            subprocess.run(["termux-open-url", url], timeout=2)
+            subprocess.run(
+                ["termux-open-url", url],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            )
+            print("[Termux] 已尝试打开浏览器")
             return
         except Exception:
             pass
-        webbrowser.open(url)
+        # PC / Fallback
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
 
-    threading.Thread(target=try_open, daemon=True).start()
+    threading.Thread(target=try_open_browser, daemon=True).start()
 
     try:
+        # 主线程保持运行（server 在后台线程 serve_forever）
         while True:
             time.sleep(3600)
     except KeyboardInterrupt:

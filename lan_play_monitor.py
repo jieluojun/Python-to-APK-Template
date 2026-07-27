@@ -1681,33 +1681,30 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "仅支持 GET 请求"}, status=405)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ 对外 API（供 Kivy / main.py import 使用）
+# 启动入口（已适配 Android / 手机 Python）
 # ══════════════════════════════════════════════════════════════════════════════
 
-def start_server(host: str | None = None, port: int | None = None) -> HTTPServer:
-    """
-    非阻塞启动 HTTP Server
-    ✅ 供 Kivy / Android / 其他框架 import 调用
-    ✅ 默认 127.0.0.1（Android 安全），可通过参数或环境变量覆盖
-    """
-    host = host or os.getenv("HOST", "127.0.0.1")
-    port = port or int(os.getenv("PORT", "5000"))
+# 备用
+# if __name__ == "__main__":
+    # host = os.getenv("HOST", "0.0.0.0")
+    # port = int(os.getenv("PORT", "5000"))
 
-    server = HTTPServer((host, port), MonitorHandler)
-    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # print(f"[启动] {APP_NAME}")
+    # print(f"[监听] http://{host}:{port}")
+    # print(f"[服务器数] {len(SERVERS)}")
+    # print(f"[缓存TTL] {CACHE_TTL}s  请求超时 {REQUEST_TIMEOUT}s  UDP扫描 {UDP_SCAN_SECONDS}s")
+    # print("按 Ctrl+C 停止")
 
-    threading.Thread(
-        target=server.serve_forever,
-        daemon=True,
-        name="LanPlayHTTPServer"
-    ).start()
-
-    print(f"[LAN-Play] HTTP Server started: http://{host}:{port}/")
-    return server
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ✅ 直接运行（PC / Termux / Android 终端）
-# ══════════════════════════════════════════════════════════════════════════════
+    # server = HTTPServer((host, port), MonitorHandler)
+    # server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # try:
+        # server.serve_forever()
+    # except KeyboardInterrupt:
+        # print("\n[停止] 正在关闭...")
+        # server.server_close()
+        # for scanner in ACTIVE_SCANNERS.values():
+            # scanner.close()
+        # print("[停止] 已关闭")
 
 if __name__ == "__main__":
     import webbrowser
@@ -1715,19 +1712,17 @@ if __name__ == "__main__":
 
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "5000"))
-    url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}/"
+    url = f"http://{host}:{port}/"
 
     print(f"[启动] {APP_NAME}")
     print(f"\033[94m[监听] {url}\033[0m")
     print("\033[93m👉 点击上方链接，或用浏览器打开 👈\033[0m")
 
-    # 使用 start_server() 启动（非阻塞），然后主线程等待
-    server = start_server(host=host, port=port)
+    server = HTTPServer((host, port), MonitorHandler)
+    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    def try_open_browser() -> None:
-        """尝试自动打开浏览器（Android / Termux / PC）"""
+    def open_browser() -> None:
         time.sleep(0.4)
-        # Android
         try:
             subprocess.run(
                 ["am", "start", "--user", "0",
@@ -1739,7 +1734,6 @@ if __name__ == "__main__":
             return
         except Exception:
             pass
-        # Termux
         try:
             subprocess.run(
                 ["termux-open-url", url],
@@ -1749,18 +1743,15 @@ if __name__ == "__main__":
             return
         except Exception:
             pass
-        # PC / Fallback
         try:
             webbrowser.open(url)
         except Exception:
             pass
 
-    threading.Thread(target=try_open_browser, daemon=True).start()
+    threading.Thread(target=open_browser, daemon=True).start()
 
     try:
-        # 主线程保持运行（server 在后台线程 serve_forever）
-        while True:
-            time.sleep(3600)
+        server.serve_forever()
     except KeyboardInterrupt:
         print("\n[停止] 正在关闭...")
         server.server_close()

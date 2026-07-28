@@ -82,32 +82,35 @@ jobs:
 
         buildozer -v android release 2>&1 | tee buildozer.log
 
-    - name: Locate APK (Fixed)
+    - name: Locate and copy APK (Fixed)
       id: find-apk
       run: |
         mkdir -p apk-out
 
-        # ✅ 优先在 bin/ 目录查找 release APK（Buildozer 实际输出位置）
-        APK=$(find ./bin -maxdepth 1 -name "*release.apk" | head -n 1)
+        # 查找 bin 目录下的 release APK 并直接复制到 apk-out 文件夹
+        find ./bin -maxdepth 1 -name "*release.apk" -exec cp {} apk-out/ \;
 
-        if [ -z "$APK" ]; then
+        # 列出 apk-out 目录确认文件已复制
+        ls -l apk-out/
+
+        # 检查是否有文件
+        if [ -z "$(ls -A apk-out/)" ]; then
           echo "❌ APK not found in ./bin"
+          echo "--- bin directory contents ---"
           ls -R ./bin || true
-          echo "APK_NOT_FOUND=true" >> $GITHUB_OUTPUT
+          echo "--- .buildozer directory contents ---"
+          find .buildozer -name "*.apk" || true
           exit 1
         fi
 
-        cp "$APK" apk-out/
-        echo "✅ Found APK: $APK"
-        echo "APK_PATH=$APK" >> $GITHUB_OUTPUT
-        echo "APK_NAME=$(basename $APK)" >> $GITHUB_OUTPUT
+        echo "✅ APK copied to apk-out successfully"
 
     - name: Upload APK artifact
-      if: steps.find-apk.outputs.APK_NAME != ''
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.find-apk.outputs.APK_NAME }}
-        path: apk-out/*.apk
+        name: LanPlay-Monitor-Release-APK
+        path: apk-out/
         retention-days: 30
 
     - name: Upload build logs

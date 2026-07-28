@@ -1,0 +1,124 @@
+name: Build Kivy Android APK (Signed Release)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  checks: read
+
+env:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+  CYTHON_LANGUAGE_LEVEL: "3"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git zip unzip \
+          python3-pip autoconf automake libtool \
+          pkg-config zlib1g-dev libncurses5-dev \
+          libncursesw5-dev cmake libffi-dev libssl-dev \
+          curl unzip openjdk-17-jdk libltdl-dev
+
+    - name: Install Buildozer and dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install buildozer cython==0.29.33 kivy kivymd
+        pip install python-for-android
+
+    # ✅ 关键步骤：还原 keystore
+    - name: Decode and prepare release keystore
+      run: |
+        echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > release.keystore
+        ls -lh release.keystore
+
+    # ✅ 构建 Signed Release APK
+    - name: Build signed release APK with Buildozer
+      env:
+        KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
+        KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
+        KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
+        KEYALIAS_PASSWORD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+
+        cat > buildozer.spec <<EOF
+[app]
+title = MyApp
+package.name = myapp
+package.domain = org.example
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0
+
+# ✅ 签名配置
+android.release = True
+android.sign = True
+android.keystore_path = $KEYSTORE_PATH
+android.keyalias = $KEYALIAS
+android.keystore_password = $KEYSTORE_PASSWORD
+android.keyalias_password = $KEYALIAS_PASSWORD
+
+# 其他常用配置
+requirements = python3,kivy,kivymd
+orientation = portrait
+fullscreen = 0
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
+EOF
+
+        buildozer -v android release 2>&1 | tee buildozer.log
+
+    - name: Check if APK was built
+      id: check-build
+      run: |
+        mkdir -p bin
+        find . -name "*-release.apk" -exec cp {} bin/ \;
+        if ls bin/*.apk 1>/dev/null 2>&1; then
+          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
+          ls -la bin/
+        else
+          echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload signed APK
+      if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: kivy-app-release-apk
+        path: bin/*.apk
+        retention-days: 30
+
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: buildozer.log
+        retention-days: 7

@@ -70,7 +70,7 @@ jobs:
     # ──────────────────────────────────────
     - name: Restore and verify fixed debug keystore
       run: |
-        mkdir -p /root/.android
+        mkdir -p ~/.android
 
         # 检查 Secret 是否配置
         if [ -z "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
@@ -82,22 +82,22 @@ jobs:
         fi
 
         # 还原 keystore
-        echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > /root/.android/debug.keystore
+        echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
 
         # 校验文件有效
-        if [ ! -s /root/.android/debug.keystore ]; then
+        if [ ! -s ~/.android/debug.keystore ]; then
           echo "❌ ERROR: debug.keystore is empty!"
           exit 1
         fi
 
         echo "✅ Keystore restored successfully"
-        ls -la /root/.android/debug.keystore
+        ls -la ~/.android/debug.keystore
 
         # ★ 打印 SHA1 指纹（每次构建对比这个值是否一致）
         echo ""
         echo "=== 🔑 Keystore SHA1 Fingerprint ==="
         keytool -list -v \
-          -keystore /root/.android/debug.keystore \
+          -keystore ~/.android/debug.keystore \
           -storepass android \
           -keypass android \
           -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256|Alias name"
@@ -157,40 +157,4 @@ jobs:
       if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
       run: |
         echo "=== APK signing certificate ==="
-        keytool -printcert -jarfile bin/*.apk 2>&1 | grep -E "SHA1|SHA256|Owner"
-
-        echo ""
-        echo "=== Keystore certificate (should match above) ==="
-        keytool -list -v \
-          -keystore ~/.android/debug.keystore \
-          -storepass android \
-          -keypass android \
-          -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256"
-
-        echo ""
-        echo "✅ If the SHA1/SHA256 above match, signing is consistent"
-
-    # ──────────────────────────────────────
-    # 10. 上传 APK
-    # ──────────────────────────────────────
-    - name: Upload APK artifact
-      if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: kivy-app-apk
-        path: bin/*.apk
-        retention-days: 30
-
-    # ──────────────────────────────────────
-    # 11. 上传日志
-    # ──────────────────────────────────────
-    - name: Upload build logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          buildozer.log
-          clean.log
-          update.log
-        retention-days: 7
+        keytool -printcert -jarfile bin/*.apk 2>&1 | grep -E "SHA1|S

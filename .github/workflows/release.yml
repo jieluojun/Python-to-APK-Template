@@ -58,8 +58,8 @@ jobs:
         if [ ! -f "com.lanplay.monitor.keystore" ]; then
           echo "Creating new keystore..."
           keytool -genkey -v \
-            -keystore DomainName.PackageName.keystore \
-            -alias DomainName.PackageName \
+            -keystore com.lanplay.monitor.keystore \
+            -alias com.lanplay.monitor \
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
             -storepass android \
@@ -126,7 +126,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: android-keystore
-        path: DomainName.PackageName.keystore
+        path: com.lanplay.monitor.keystore
         retention-days: 1
 
     - name: Upload build logs

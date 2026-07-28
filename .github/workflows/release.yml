@@ -1,23 +1,23 @@
-name: Build Kivy Android APK In Release Mode
+name: Build Kivy Android APK (Release)
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
+  checks: read
 
 env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   ANDROID_HOME: /usr/local/lib/android/sdk
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
   CYTHON_LANGUAGE_LEVEL: "3"
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java.home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
 
     steps:
     - name: Checkout code
@@ -42,73 +42,68 @@ jobs:
           python3-pip autoconf automake libtool \
           pkg-config zlib1g-dev libncurses5-dev \
           libncursesw5-dev cmake libffi-dev libssl-dev \
-          curl openjdk-17-jdk libltdl-dev patchelf \
-          lld ninja-build
+          curl openjdk-17-jdk libltdl-dev
 
-    - name: Install Buildozer and locked deps
+    - name: Install Buildozer and Python deps
       run: |
         python -m pip install --upgrade pip
-        pip install cython==0.29.33
-        pip install "kivy==2.2.1" "kivymd==1.1.5"
-        pip install buildozer python-for-android
+        pip install buildozer cython==0.29.33 kivy python-for-android
 
-    - name: Generate signing key (if not exists)
+    - name: Decode signing key from Base64
       run: |
-        if [ ! -f "com.lanplay.monitor.keystore" ]; then
-          echo "Creating new keystore..."
-          keytool -genkey -v \
-            -keystore com.lanplay.monitor.keystore \
-            -alias com.lanplay.monitor \
-            -keyalg RSA -keysize 2048 \
-            -validity 10000 \
-            -storepass "${{ secrets.KEYSTORE_PASSWD }}" \
-            -keypass "${{ secrets.KEYALIAS_PASSWD }}" \
-            -dname "CN=Unknown, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown"
-        else
-          echo "Using existing keystore."
-        fi
+        echo "Decoding keystore..."
+        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > $GITHUB_WORKSPACE/DomainName.PackageName.keystore
+    
+    - name: Prepare Android signing env
+      run: |
+        echo "P4A_RELEASE_KEYSTORE=$GITHUB_WORKSPACE/DomainName.PackageName.keystore" >> $GITHUB_ENV
+        echo "P4A_RELEASE_KEYALIAS=${{ secrets.RELEASE_KEYALIAS }}" >> $GITHUB_ENV
+        echo "P4A_RELEASE_KEYSTORE_PASSWD=${{ secrets.RELEASE_KEYSTORE_PASSWD }}" >> $GITHUB_ENV
+        echo "P4A_RELEASE_KEYALIAS_PASSWD=${{ secrets.RELEASE_KEYALIAS_PASSWD }}" >> $GITHUB_ENV
 
     - name: Build APK with Buildozer (Release)
       run: |
-        set -e
         export PATH="$HOME/.local/bin:$PATH"
-        export BUILDOZER_ALLOW_PLATFORM_EXEC=1   # ✅ 修正拼写
+
+        echo "=== Environment Check ==="
+        java -version
+        python --version
+        buildozer --version
+
+        # 修复你原文件里的拼写错误
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
 
-        export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
-        export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
-        export P4A_RELEASE_KEYSTORE_PASSWD="${{ secrets.KEYSTORE_PASSWD }}"
-        export P4A_RELEASE_KEYALIAS_PASSWD="${{ secrets.KEYALIAS_PASSWD }}"
+        # 明确禁用 AAB（与你 spec 保持一致）
+        export BUILDOZER_ANDROID_AAB=False
 
-        # 清理 + 明确指定 arch，减少坑
-        buildozer android clean
-        buildozer -v android release
+        buildozer -v android release 2>&1 | tee buildozer.log
 
-        echo "=== APK search ==="
-        find .buildozer -name "*.apk" | tee apk_list.txt
-
-        # ✅ 强制失败：没 APK 就红
-        if [ ! -s apk_list.txt ]; then
-          echo "::error::No APK generated"
+    - name: Locate APK
+      id: find-apk
+      run: |
+        mkdir -p apk-out
+        APK=$(find .buildozer -name "*.apk" | head -n 1)
+        if [ -z "$APK" ]; then
+          echo "APK_NOT_FOUND=true" >> $GITHUB_OUTPUT
           exit 1
         fi
-
-    - name: Copy APK to bin/
-      run: |
-        mkdir -p bin
-        find .buildozer -name "*.apk" -exec cp {} bin/ \;
+        cp "$APK" apk-out/
+        echo "APK_PATH=$APK" >> $GITHUB_OUTPUT
+        echo "APK_NAME=$(basename $APK)" >> $GITHUB_OUTPUT
 
     - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: kivy-app-release-apk
-        path: bin/*.apk
+        name: ${{ steps.find-apk.outputs.APK_NAME }}
+        path: apk-out/*.apk
         retention-days: 30
 
     - name: Upload build logs
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
+        name: buildozer-logs
         path: buildozer.log
         retention-days: 7

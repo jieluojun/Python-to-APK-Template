@@ -1,4 +1,4 @@
-    name: Build Kivy Android APK In Release Mode
+name: Build Kivy Android APK In Release Mode
 
 on:
   workflow_dispatch:

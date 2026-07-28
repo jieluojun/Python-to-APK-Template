@@ -5,7 +5,7 @@ package.domain = com.lanplay
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
-version = 1.0.0
+version = 1.0.1
 # 依赖
 requirements = python3
 icon.filename = icon.png
@@ -33,7 +33,10 @@ android.sdk = 33
 android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
-android.permissions = INTERNET
+
+# 已添加：所有文件访问权权限（包含传统读写权限及 Android 11+ 的 MANAGE_EXTERNAL_STORAGE 权限）
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
+
 # 强制构建APK，然而并没有用
 android.aab = False
 # 签名配置
@@ -45,7 +48,3 @@ android.keystore_alias = com.lanplay.monitor
 [buildozer]
 log_level = 2
 warn_on_root = 1
-
-
-
-

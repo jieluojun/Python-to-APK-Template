@@ -9,27 +9,14 @@
 - 所有 UDP 扫描、房间解析逻辑保持不变
 
 启动：
-    python Lan-Play房间监控2.0.py
+    python lan_play_monitor.py
     # 浏览器打开 http://0.0.0.0:5000/
 
 局域网访问：
-    HOST=0.0.0.0 python Lan-Play房间监控2.0.py
+    HOST=0.0.0.0 python lan_play_monitor.py
 
-可选，创建 servers.json 文件（放在本脚本同目录）内容格式为：
-[
-  {
-    "id":"my-server", 
-    "name": "我的服务器",
-    "host": "example.com",
-    "port": 11451,
-    "type": "graphql",
-    "region": "🇨🇳"
-  }
-]
-注意：servers.json 中的服务器会与内置列表**合并**（同 id 以 json 为准），
-      而非替换。环境变量 SERVERS_FILE 指定其他路径时则仅使用该文件。
+可选，通过环境变量 SERVERS_FILE 指定本地 servers.json 文件的其他路径。
 """
-
 from __future__ import annotations
 
 import copy
@@ -41,6 +28,7 @@ import struct
 import threading
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,9 +42,42 @@ import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 日志捕获器（用于实时加载日志功能）
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LogCapturer:
+    def __init__(self):
+        self.terminal = sys.stdout
+        self.buffer = deque(maxlen=300)
+        self.lock = threading.Lock()
+
+    def write(self, message):
+        if self.terminal:
+            self.terminal.write(message)
+            self.terminal.flush()
+        msg = message.strip()
+        if msg:
+            with self.lock:
+                self.buffer.append(msg)
+
+    def flush(self):
+        if self.terminal:
+            self.terminal.flush()
+
+    def get_logs(self):
+        with self.lock:
+            return list(self.buffer)
+
+import sys
+log_capturer = LogCapturer()
+sys.stdout = log_capturer
+sys.stderr = log_capturer
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 常量 & 配置（已优化刷新速度相关参数）
 # ══════════════════════════════════════════════════════════════════════════════
 
+SERVERS_FILE = "/sdcard/servers.json"
 APP_NAME = "direct-lan-play-monitor"
 CACHE_TTL = max(1, int(os.getenv("CACHE_TTL", "12")))
 REQUEST_TIMEOUT = max(1.0, float(os.getenv("REQUEST_TIMEOUT", "3"))) # 优化：适当缩短单次请求超时上限
@@ -218,6 +239,7 @@ BUILTIN_GAME_TITLES: dict[str, str] = {
 }
 
 REMOTE_CHINESE_DB_URL = "https://v6.gh-proxy.org/https://raw.githubusercontent.com/jieluojun/lan-play-monitor/refs/heads/main/chinese_db.json"
+REMOTE_SERVERS_URL = "https://v6.gh-proxy.org/https://raw.githubusercontent.com/jieluojun/lan-play-monitor/refs/heads/main/servers.json"
 
 import ssl
 
@@ -231,12 +253,10 @@ def load_game_titles() -> dict[str, str]:
             headers={"User-Agent": f"{APP_NAME}/1.0", "Accept": "application/json"}
         )
         
-        # 建立一个不验证 SSL 证书的上下文
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         
-        # 将 context 传入 urlopen
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
             data = json.loads(resp.read().decode("utf-8-sig"))
             if isinstance(data, dict):
@@ -681,36 +701,62 @@ def validate_server(raw: Any) -> dict[str, Any]:
     return {"id": server_id, "name": name, "host": host, "port": port, "type": protocol, "region": region}
 
 def load_servers() -> list[dict[str, Any]]:
-    configured = os.getenv("SERVERS_FILE", "").strip()
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_file():
-            raise RuntimeError(f"指定的服务器配置文件不存在：{path}")
+    configured = os.getenv("SERVERS_FILE", "").strip() or SERVERS_FILE
+    path = Path(configured).expanduser() if configured else None
+    
+    merged: dict[str, dict[str, Any]] = {}
+
+    # 0. 先加载内置默认服务器作为基础底座
+    for item in DEFAULT_SERVERS:
         try:
+            srv = validate_server(item)
+            merged[srv["id"]] = srv
+        except Exception as exc:
+            print(f"[配置警告] 内置服务器项解析失败: {exc}")
+
+    # 1. 如果指定的本地配置文件路径存在，读取并合并/覆盖内置服务器
+    if path and path.is_file():
+        try:
+            print(f"[配置] 正在读取指定的服务器配置文件: {path}")
             raw = json.loads(path.read_text(encoding="utf-8"))
-            print(f"[配置] 已读取 {path}")
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"无法读取服务器配置 {path}：{exc}") from exc
-        if not isinstance(raw, list) or not raw:
-            raise RuntimeError("服务器配置必须是非空 JSON 数组")
-        servers = [validate_server(item) for item in raw]
-    else:
-        path = Path(__file__).with_name("servers.json")
-        merged: dict[str, dict] = {s["id"]: dict(s) for s in DEFAULT_SERVERS}
-        if path.is_file():
-            try:
-                extra = json.loads(path.read_text(encoding="utf-8"))
-                print(f"[配置] 已读取 {path}，将与内置服务器合并")
-            except (OSError, json.JSONDecodeError) as exc:
-                raise RuntimeError(f"无法读取服务器配置 {path}：{exc}") from exc
-            if not isinstance(extra, list):
-                raise RuntimeError("servers.json 必须是 JSON 数组")
-            for item in extra:
-                srv = validate_server(item)
-                merged[srv["id"]] = srv
-        else:
-            print(f"[配置] 未找到 {path}，使用内置服务器列表（{len(merged)} 个）")
-        servers = list(merged.values())
+            if isinstance(raw, list):
+                local_count = 0
+                for item in raw:
+                    srv = validate_server(item)
+                    merged[srv["id"]] = srv  # 相同 id 覆盖，不同 id 添加
+                    local_count += 1
+                print(f"[配置] 成功加载指定文件内容，共计 {local_count} 条，合并后总数: {len(merged)}")
+            else:
+                print(f"[配置警告] 指定的配置文件格式不正确（非 JSON 数组）: {path}")
+        except Exception as exc:
+            print(f"[配置警告] 读取指定的配置文件失败（{exc}）: {path}")
+
+    # 2. 尝试从远程仓库读取服务器列表，并与现有内容进行合并
+    try:
+        print(f"[配置] 正在从远程仓库读取服务器列表: {REMOTE_SERVERS_URL}")
+        req = urllib.request.Request(
+            REMOTE_SERVERS_URL,
+            headers={"User-Agent": f"{APP_NAME}/1.0", "Accept": "application/json"}
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+            remote_data = json.loads(resp.read().decode("utf-8-sig"))
+            if isinstance(remote_data, list):
+                remote_count = 0
+                for item in remote_data:
+                    srv = validate_server(item)
+                    merged[srv["id"]] = srv  # 远程数据覆盖或补充到现有配置中
+                    remote_count += 1
+                print(f"[配置] 成功加载远程服务器列表，共计 {remote_count} 条，合并后总数: {len(merged)}")
+            else:
+                print("[配置警告] 远程服务器列表格式不正确（非 JSON 数组）")
+    except Exception as exc:
+        print(f"[配置警告] 无法从远程读取服务器列表（{exc}）")
+
+    servers = list(merged.values())
     ids = [item["id"] for item in servers]
     if len(ids) != len(set(ids)):
         raise RuntimeError("服务器配置中存在重复 id")
@@ -964,8 +1010,15 @@ PAGE_HTML = r"""<!doctype html>
       --font:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
       --transition:all .25s cubic-bezier(.4,0,.2,1);
     }
+    /* 手动深色模式类，或跟随系统 */
+    html.dark{
+      --bg:#0f1923;--card:rgba(22,34,46,.85);--white:#16222e;--ink:#e0eef8;
+      --muted:#7a9bb5;--blue:#1a3344;--cyan:#2ee6c8;--red:#ff5a6e;
+      --line:rgba(255,255,255,.06);--shadow:0 16px 44px rgba(0,0,0,.4);
+      --green:#3dd9b8;--green-bg:rgba(61,217,184,.12);--orange:#ffb347;
+    }
     @media (prefers-color-scheme: dark){
-      :root{
+      :root:not(.light){
         --bg:#0f1923;--card:rgba(22,34,46,.85);--white:#16222e;--ink:#e0eef8;
         --muted:#7a9bb5;--blue:#1a3344;--cyan:#2ee6c8;--red:#ff5a6e;
         --line:rgba(255,255,255,.06);--shadow:0 16px 44px rgba(0,0,0,.4);
@@ -982,10 +1035,17 @@ PAGE_HTML = r"""<!doctype html>
       transition:background .4s ease,color .4s ease;
       -webkit-tap-highlight-color:transparent;overflow-x:hidden;
     }
+    html.dark body{
+      background:radial-gradient(circle at 8% 6%,rgba(30,55,75,.6),transparent 25%),
+                 radial-gradient(circle at 92% 42%,rgba(20,45,65,.5),transparent 28%),
+                 linear-gradient(180deg,#0f1923,#0a1218);
+    }
     @media (prefers-color-scheme: dark){
-      body{background:radial-gradient(circle at 8% 6%,rgba(30,55,75,.6),transparent 25%),
-                        radial-gradient(circle at 92% 42%,rgba(20,45,65,.5),transparent 28%),
-                        linear-gradient(180deg,#0f1923,#0a1218)}
+      :root:not(.light) body{
+        background:radial-gradient(circle at 8% 6%,rgba(30,55,75,.6),transparent 25%),
+                   radial-gradient(circle at 92% 42%,rgba(20,45,65,.5),transparent 28%),
+                   linear-gradient(180deg,#0f1923,#0a1218);
+      }
     }
     a{color:inherit;text-decoration:none}
     button{font:inherit}
@@ -994,14 +1054,27 @@ PAGE_HTML = r"""<!doctype html>
     .page{width:min(1100px,calc(100%-32px));margin:auto;padding:24px 0 24px;animation:fadeIn .5s ease}
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .glass{border:1px solid rgba(255,255,255,.8);background:var(--card);box-shadow:var(--shadow);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);transition:var(--transition)}
-    @media (prefers-color-scheme: dark){.glass{border-color:rgba(255,255,255,.05)}}
+    html.dark .glass{border-color:rgba(255,255,255,.05)}
+    @media (prefers-color-scheme: dark){:root:not(.light) .glass{border-color:rgba(255,255,255,.05)}}
 
     .hero{margin-top:0;min-height:68px;border-radius:var(--radius-lg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:12px;z-index:100}
-    .brand{display:flex;align-items:center;gap:12px;min-width:0;flex-shrink:0}
+    .brand-area{display:flex;align-items:center;gap:12px;min-width:0;flex-shrink:0}
+    .brand{display:flex;align-items:center;gap:12px;min-width:0;cursor:pointer}
     .logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#fff970,#ffd626);box-shadow:inset 0 0 0 2px rgba(255,255,255,.7),0 4px 12px rgba(255,200,40,.25);font-size:20px;animation:pulse 3s ease-in-out infinite;flex-shrink:0}
     @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
     .brand strong{display:block;font:italic 700 22px Georgia,serif;letter-spacing:.3px}
     .brand small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+
+    /* 主题切换按钮样式 */
+    .theme-toggle{border:0;width:38px;height:38px;border-radius:12px;background:#e1f1fa;color:var(--ink);cursor:pointer;display:grid;place-items:center;font-size:16px;transition:var(--transition);flex-shrink:0}
+    .theme-toggle:hover{background:#cce9f9;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    html.dark .theme-toggle{background:rgba(255,255,255,.08);color:var(--cyan)}
+    html.dark .theme-toggle:hover{background:rgba(255,255,255,.15)}
+    @media (prefers-color-scheme: dark){
+      :root:not(.light) .theme-toggle{background:rgba(255,255,255,.08);color:var(--cyan)}
+      :root:not(.light) .theme-toggle:hover{background:rgba(255,255,255,.15)}
+    }
+
     .dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 6px rgba(25,200,174,.13);animation:pulse-dot 2s ease-in-out infinite}
     @keyframes pulse-dot{0%,100%{box-shadow:0 0 0 6px rgba(25,200,174,.13)}50%{box-shadow:0 0 0 10px rgba(25,200,174,.06)}}
     .scan{display:flex;align-items:center;gap:10px;color:var(--muted);font-weight:700;font-size:13px;flex-shrink:0}
@@ -1014,6 +1087,20 @@ PAGE_HTML = r"""<!doctype html>
     .refresh.loading .refresh-text::before{content:'刷新中'}
     .refresh.loading .refresh-text span{display:none}
     @keyframes spin{to{transform:rotate(360deg)}}
+    html.dark .refresh{background:rgba(255,255,255,.08);color:var(--ink)}
+    html.dark .refresh:hover{background:rgba(255,255,255,.15)}
+    @media (prefers-color-scheme: dark){
+      :root:not(.light) .refresh{background:rgba(255,255,255,.08);color:var(--ink)}
+      :root:not(.light) .refresh:hover{background:rgba(255,255,255,.15)}
+    }
+
+    /* 日志弹窗样式 */
+    .log-modal{position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;z-index:1000}
+    .log-modal.open{display:flex}
+    .log-box{background:var(--white);width:min(800px,calc(100% - 32px));height:500px;border-radius:var(--radius-md);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line)}
+    .log-header{padding:14px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);font-weight:800;font-size:15px}
+    .log-close{background:none;border:0;font-size:18px;cursor:pointer;color:var(--muted)}
+    .log-content{flex:1;padding:16px;background:#0b131a;color:#3dd9b8;font-family:monospace;font-size:12.5px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;line-height:1.5}
 
     .overview{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px}
     .ov-card{padding:18px 16px;background:var(--white);border-radius:var(--radius-md);box-shadow:0 6px 20px rgba(82,142,178,.06);text-align:center;transition:var(--transition)}
@@ -1021,7 +1108,13 @@ PAGE_HTML = r"""<!doctype html>
     .ov-card span{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-bottom:3px}
     .ov-card b{font-size:26px;font-weight:900}
     .ov-card.online b{color:#2b8a6f}.ov-card.idle b{color:#b8860b}.ov-card.rooms b{color:#1a73c0}.ov-card.servers b{color:#6f42c1}
-    @media (prefers-color-scheme: dark){.ov-card.online b{color:#3dd9b8}.ov-card.idle b{color:#ffb347}.ov-card.rooms b{color:#7ab8ff}.ov-card.servers b{color:#c4a7ff}}
+    html.dark .ov-card.online b{color:#3dd9b8}html.dark .ov-card.idle b{color:#ffb347}html.dark .ov-card.rooms b{color:#7ab8ff}html.dark .ov-card.servers b{color:#c4a7ff}
+    @media (prefers-color-scheme: dark){
+      :root:not(.light) .ov-card.online b{color:#3dd9b8}
+      :root:not(.light) .ov-card.idle b{color:#ffb347}
+      :root:not(.light) .ov-card.rooms b{color:#7ab8ff}
+      :root:not(.light) .ov-card.servers b{color:#c4a7ff}
+    }
 
     .server-list{margin-top:18px;display:grid;gap:12px;contain:layout style}
     .server-group{
@@ -1036,7 +1129,8 @@ PAGE_HTML = r"""<!doctype html>
       touch-action:manipulation;
     }
     .server-head:hover{background:rgba(125,175,210,.06)}
-    @media (prefers-color-scheme: dark){.server-head:hover{background:rgba(255,255,255,.03)}}
+    html.dark .server-head:hover{background:rgba(255,255,255,.03)}
+    @media (prefers-color-scheme: dark){:root:not(.light) .server-head:hover{background:rgba(255,255,255,.03)}}
 
     .server-status-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;position:relative}
     .server-status-dot.online{background:#19c8ae;box-shadow:0 0 0 4px rgba(25,200,174,.15)}
@@ -1085,7 +1179,12 @@ PAGE_HTML = r"""<!doctype html>
       justify-content:center;
     }
     .stat-item.online b{color:#2b8a6f} .stat-item.idle b{color:#b8860b} .stat-item.rooms b{color:#1a73c0}
-    @media (prefers-color-scheme: dark){.stat-item.online b{color:#3dd9b8}.stat-item.idle b{color:#ffb347}.stat-item.rooms b{color:#7ab8ff}}
+    html.dark .stat-item.online b{color:#3dd9b8}html.dark .stat-item.idle b{color:#ffb347}html.dark .stat-item.rooms b{color:#7ab8ff}
+    @media (prefers-color-scheme: dark){
+      :root:not(.light) .stat-item.online b{color:#3dd9b8}
+      :root:not(.light) .stat-item.idle b{color:#ffb347}
+      :root:not(.light) .stat-item.rooms b{color:#7ab8ff}
+    }
 
     .stat-item.latency b{
       font-size:15px;
@@ -1097,11 +1196,15 @@ PAGE_HTML = r"""<!doctype html>
     .latency-badge.normal{color:var(--muted);}
     .latency-badge.slow{color:#a52639;}
     .latency-badge.error{color:var(--muted);font-weight:900;}
+    html.dark .latency-badge.fast{color:#3dd9b8;}
+    html.dark .latency-badge.normal{color:var(--muted);}
+    html.dark .latency-badge.slow{color:#ff5a6e;}
+    html.dark .latency-badge.error{color:var(--muted);}
     @media (prefers-color-scheme: dark){
-      .latency-badge.fast{color:#3dd9b8;}
-      .latency-badge.normal{color:var(--muted);}
-      .latency-badge.slow{color:#ff5a6e;}
-      .latency-badge.error{color:var(--muted);}
+      :root:not(.light) .latency-badge.fast{color:#3dd9b8;}
+      :root:not(.light) .latency-badge.normal{color:var(--muted);}
+      :root:not(.light) .latency-badge.slow{color:#ff5a6e;}
+      :root:not(.light) .latency-badge.error{color:var(--muted);}
     }
 
     .server-body{
@@ -1113,7 +1216,8 @@ PAGE_HTML = r"""<!doctype html>
     .server-group.open .server-body > .body-inner{padding:0 22px 20px}
 
     .server-error{padding:14px 18px;border-radius:14px;background:#fff0f2;color:#a52639;font-size:13px;font-weight:600;margin-top:4px;display:flex;align-items:center;gap:8px}
-    @media (prefers-color-scheme: dark){.server-error{background:rgba(255,90,110,.08);color:#ff5a6e}}
+    html.dark .server-error{background:rgba(255,90,110,.08);color:#ff5a6e}
+    @media (prefers-color-scheme: dark){:root:not(.light) .server-error{background:rgba(255,90,110,.08);color:#ff5a6e}}
 
     .room-list{display:grid;gap:10px;margin-top:8px}
     .room-item{
@@ -1127,19 +1231,22 @@ PAGE_HTML = r"""<!doctype html>
     .room-host::before{content:'🏠';font-size:15px}
     .room-host-icon{width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0;vertical-align:middle}
     .room-game{font-size:12.5px;padding:4px 12px;border-radius:999px;background:#e9f5fb;color:#326887;font-weight:700;white-space:nowrap}
-    @media (prefers-color-scheme: dark){.room-game{background:rgba(97,194,233,.12);color:#7dd3fc}}
+    html.dark .room-game{background:rgba(97,194,233,.12);color:#7dd3fc}
+    @media (prefers-color-scheme: dark){:root:not(.light) .room-game{background:rgba(97,194,233,.12);color:#7dd3fc}}
     .room-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:13px;color:#376482;font-weight:600}
     .room-meta .green{color:var(--green);font-weight:750}
     .room-meta .red{color:var(--red);font-weight:800}
     .room-players{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
     .room-players .player{padding:3px 10px;border-radius:999px;background:var(--green-bg);color:#17776b;font-size:11.5px;font-weight:600}
-    @media (prefers-color-scheme: dark){.room-players .player{background:rgba(61,217,184,.12);color:#3dd9b8}}
+    html.dark .room-players .player{background:rgba(61,217,184,.12);color:#3dd9b8}
+    @media (prefers-color-scheme: dark){:root:not(.light) .room-players .player{background:rgba(61,217,184,.12);color:#3dd9b8}}
 
     .no-rooms{padding:20px;text-align:center;color:var(--muted);font-size:13px;background:rgba(125,175,210,.04);border-radius:14px;margin-top:8px}
     .no-rooms-match{padding:14px 18px;text-align:center;color:var(--muted);font-size:12.5px;background:rgba(125,175,210,.03);border-radius:12px;margin-top:6px}
 
     .skeleton{height:60px;border-radius:14px;background:linear-gradient(100deg,#f0f6fa 20%,#e2eef5 38%,#f0f6fa 56%);background-size:300% 100%;animation:shine 1.4s infinite;margin-top:8px}
-    @media (prefers-color-scheme: dark){.skeleton{background:linear-gradient(100deg,#1a2530 20%,#243240 38%,#1a2530 56%);background-size:300% 100%}}
+    html.dark .skeleton{background:linear-gradient(100deg,#1a2530 20%,#243240 38%,#1a2530 56%);background-size:300% 100%}
+    @media (prefers-color-scheme: dark){:root:not(.light) .skeleton{background:linear-gradient(100deg,#1a2530 20%,#243240 38%,#1a2530 56%);background-size:300% 100%}}
     @keyframes shine{to{background-position-x:-100%}}
 
     .filters{display:flex;gap:8px;overflow-x:auto;padding:14px 0 4px;scrollbar-width:none}
@@ -1147,15 +1254,24 @@ PAGE_HTML = r"""<!doctype html>
     .filter-tab{flex:0 0 auto;border:0;border-radius:999px;padding:9px 18px;background:#e8f3f9;color:var(--ink);font-weight:700;cursor:pointer;font-size:13px;transition:var(--transition);white-space:nowrap}
     .filter-tab:hover{background:#d8eaf3}
     .filter-tab.active{background:#cde9fa;color:#0c5d91;font-weight:800;box-shadow:0 2px 8px rgba(97,194,233,.25)}
-    @media (prefers-color-scheme: dark){.filter-tab{background:rgba(255,255,255,.06)}.filter-tab:hover{background:rgba(255,255,255,.10)}.filter-tab.active{background:rgba(97,194,233,.20);color:#7dd3fc}}
+    html.dark .filter-tab{background:rgba(255,255,255,.06)}
+    html.dark .filter-tab:hover{background:rgba(255,255,255,.10)}
+    html.dark .filter-tab.active{background:rgba(97,194,233,.20);color:#7dd3fc}
+    @media (prefers-color-scheme: dark){
+      :root:not(.light) .filter-tab{background:rgba(255,255,255,.06)}
+      :root:not(.light) .filter-tab:hover{background:rgba(255,255,255,.10)}
+      :root:not(.light) .filter-tab.active{background:rgba(97,194,233,.20);color:#7dd3fc}
+    }
 
     footer{text-align:center;padding:24px 16px 8px;color:#55758c;font-size:12px;line-height:1.9;margin-top:12px}
-    @media (prefers-color-scheme: dark){footer{color:var(--muted)}}
+    html.dark footer{color:var(--muted)}
+    @media (prefers-color-scheme: dark){:root:not(.light) footer{color:var(--muted)}}
 
     @media (max-width:900px){
       .page{width:calc(100% - 20px);padding-top:14px}
       .hero{border-radius:20px;padding:10px 14px;gap:10px}
-      .brand{min-width:auto;flex-shrink:0}.brand strong{font-size:18px}
+      .brand-area{min-width:auto;flex-shrink:0}
+      .brand strong{font-size:18px}
       .scan{font-size:12px;flex-shrink:0}
       .overview{grid-template-columns:repeat(4,1fr);gap:8px}
       .ov-card{padding:14px 8px}
@@ -1168,10 +1284,11 @@ PAGE_HTML = r"""<!doctype html>
     @media (max-width:600px){
       .page{width:calc(100% - 14px);padding:10px 0 16px}
       .hero{border-radius:16px;padding:8px 10px;gap:6px;position:sticky;top:6px}
-      .brand{flex-shrink:0}
+      .brand-area{flex-shrink:0}
       .brand strong{font-size:15px}
       .brand small{display:none}
       .logo{width:34px;height:34px;border-radius:10px;font-size:16px}
+      .theme-toggle{width:34px;height:34px;border-radius:10px;font-size:14px}
       .scan{margin-top:0;font-size:11.5px;flex-shrink:0}
       .scan .refresh{flex:0 0 auto;padding:7px 12px;font-size:12px}
       .overview{grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}
@@ -1204,6 +1321,7 @@ PAGE_HTML = r"""<!doctype html>
       .brand small{display:none}
       .brand strong{font-size:14px}
       .logo{width:30px;height:30px;font-size:14px}
+      .theme-toggle{width:30px;height:30px;font-size:12px}
       .scan{font-size:10.5px;gap:6px}
       .scan .refresh{padding:6px 10px;font-size:11px}
       .server-detail .addr-text{display:none}
@@ -1219,7 +1337,10 @@ PAGE_HTML = r"""<!doctype html>
 <body>
 <div class="page">
   <section class="hero glass">
-    <a class="brand" href="/"><span class="logo">🎮</span><span><strong>Direct LDN</strong><small>独立 LAN-Play 监控</small></span></a>
+    <div class="brand-area">
+      <a class="brand" href="/"><span class="logo">🎮</span><span><strong>Direct LDN</strong><small>独立 LAN-Play 监控</small></span></a>
+      <button id="themeToggleBtn" class="theme-toggle" title="切换浅色/深色主题">🌙</button>
+    </div>
     <div class="scan">
       <i class="dot"></i><span>实时扫描</span>
       <button id="refreshBtn" class="refresh">
@@ -1228,6 +1349,17 @@ PAGE_HTML = r"""<!doctype html>
       </button>
     </div>
   </section>
+
+  <!-- 日志模态弹窗 -->
+  <div id="logModal" class="log-modal">
+    <div class="log-box">
+      <div class="log-header">
+        <span>🖥️ 实时运行日志</span>
+        <button id="closeLogBtn" class="log-close">✕</button>
+      </div>
+      <div id="logContent" class="log-content">正在加载日志...</div>
+    </div>
+  </div>
 
   <div class="overview" id="overview">
     <div class="ov-card servers"><span>在线服务器</span><b id="ovServers">—</b></div>
@@ -1251,12 +1383,86 @@ PAGE_HTML = r"""<!doctype html>
   const $ = id => document.getElementById(id);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+  // 主题切换逻辑
+  const themeToggleBtn = $('themeToggleBtn');
+  const htmlEl = document.documentElement;
+
+  // 初始化主题（优先从 localStorage 读取，其次跟随系统）
+  const savedTheme = localStorage.getItem('lan_play_theme');
+  if (savedTheme) {
+    if (savedTheme === 'dark') htmlEl.classList.add('dark');
+    else htmlEl.classList.remove('dark');
+  } else {
+    // 默认跟随系统，若系统为深色则可以显式初始化或通过媒体查询适配
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      // 默认让CSS处理，但为了按钮图标一致，检测是否处于dark
+    }
+  }
+
+  function updateThemeIcon() {
+    const isDark = htmlEl.classList.contains('dark') || (!localStorage.getItem('lan_play_theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    themeToggleBtn.textContent = isDark ? '🌞' : '🌙';
+  }
+  updateThemeIcon();
+
+  themeToggleBtn.addEventListener('click', () => {
+    const isDark = htmlEl.classList.contains('dark');
+    if (isDark) {
+      htmlEl.classList.remove('dark');
+      htmlEl.classList.add('light');
+      localStorage.setItem('lan_play_theme', 'light');
+    } else {
+      htmlEl.classList.remove('light');
+      htmlEl.classList.add('dark');
+      localStorage.setItem('lan_play_theme', 'dark');
+    }
+    updateThemeIcon();
+  });
+
   async function getJSON(url){
     const r = await fetch(url, { headers:{ Accept:'application/json' }, cache:'no-store' });
     const d = await r.json().catch(() => ({}));
     if(!r.ok || d.ok === false) throw new Error(d.error || `请求失败 (${r.status})`);
     return d;
   }
+
+  // 绑定左上角游戏图标点击显示实时日志功能
+  const brandEl = document.querySelector('.brand');
+  const logModal = $('logModal');
+  const logContent = $('logContent');
+  let logInterval = null;
+
+  async function fetchLogs() {
+    try {
+      const data = await getJSON('/api/logs');
+      if (data.ok && Array.isArray(data.logs)) {
+        logContent.textContent = data.logs.join('\n');
+        logContent.scrollTop = logContent.scrollHeight;
+      }
+    } catch(e) {
+      logContent.textContent = '加载日志失败: ' + e.message;
+    }
+  }
+
+  brandEl.addEventListener('click', (e) => {
+    e.preventDefault();
+    logModal.classList.add('open');
+    fetchLogs();
+    if(logInterval) clearInterval(logInterval);
+    logInterval = setInterval(fetchLogs, 2000);
+  });
+
+  $('closeLogBtn').addEventListener('click', () => {
+    logModal.classList.remove('open');
+    if(logInterval) clearInterval(logInterval);
+  });
+
+  logModal.addEventListener('click', (e) => {
+    if(e.target === logModal) {
+      logModal.classList.remove('open');
+      if(logInterval) clearInterval(logInterval);
+    }
+  });
 
   const statusDot = s => s==='online' ? 'online' : s==='checking' ? 'checking' : 'offline';
 
@@ -1431,7 +1637,6 @@ PAGE_HTML = r"""<!doctype html>
       list.querySelectorAll('.server-group').forEach(el => { existing.set(el.dataset.id, el); });
     }
 
-    // 对比并处理新增/移除的服务器，确保 _domCache 正确重建或同步
     const currentIds = new Set(state.servers.map(s => s.id));
     for (const [id, el] of existing.entries()) {
       if (!currentIds.has(id)) {
@@ -1730,6 +1935,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
         try:
             if self.path == "/":
                 self._send_html(PAGE_HTML)
+            elif self.path == "/api/logs":
+                self._send_json({"ok": True, "logs": log_capturer.get_logs(), "time": utc_now()})
             elif self.path == "/api/health":
                 self._send_json({
                     "ok": True, "service": APP_NAME, "time": utc_now(),

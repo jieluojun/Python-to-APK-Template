@@ -1,4 +1,4 @@
-name: Build Kivy Android APK In Release Mode
+name: Build Kivy Android APK
 
 on:
   workflow_dispatch:
@@ -50,11 +50,14 @@ jobs:
         pip install buildozer cython==0.29.33 kivy kivymd
         pip install python-for-android
 
-    - name: Build APK with Buildozer (Release)
+    - name: Build APK with Buildozer
       env:
-        # 注入你要求的两个密码环境变量
-        KEYSTORE_STOREPASS: ${{ secrets.KEYSTORE_STOREPASS }}
-        KEYSTORE_KEYPASS: ${{ secrets.KEYSTORE_KEYPASS }}
+        # 将密码正确映射为 python-for-android (p4a) 的标准 Release 签名环境变量
+        P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.KEYSTORE_STOREPASS }}
+        P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.KEYSTORE_KEYPASS }}
+        # 如果你配置了 keystore 路径和 alias，也可以在此处指定：
+        # P4A_RELEASE_KEYSTORE: ${{ github.workspace }}/your_keystore.jks
+        # P4A_RELEASE_KEYALIAS: your_alias
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         echo "Let's have a check:"
@@ -62,14 +65,20 @@ jobs:
         python --version
         buildozer --version
  
-        # 设置环境变量解决网络问题
         export BUILDODER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
  
-        # 开始构筑 Release APK
-        buildozer -v android release 2>&1 | tee buildozer.log
+        # 提示：如果你目前只是想测试生成 APK，建议临时将 "release" 改为 "debug"（debug 不需要配置复杂的签名密钥）
+        # buildozer -v android debug
+        
+        # 运行构建，如果失败则直接打印最后 100 行日志到控制台以便排查
+        buildozer -v android release 2>&1 | tee buildozer.log || {
+          echo "=== Build failed! Printing last 100 lines of buildozer.log ==="
+          tail -n 100 buildozer.log
+          exit 1
+        }
  
-        # 查找所有APK和AAB文件并复制到当前目录
+        # 查找所有编译出的 apk 或 aab 并复制到根目录
         find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
         find . -name "*.aab" -exec cp {} ./ \; 2>/dev/null || true
 
@@ -82,9 +91,11 @@ jobs:
           ls -la *.apk *.aab 2>/dev/null || true
         else
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "未找到构建文件"
-          echo "检查构建目录"
-          find .buildozer -name "*.apk" -o -name "*.aab" -type f 2>/dev/null | head -10
+          echo "未找到构建文件，检查 buildozer.log 末尾："
+          if [ -f "buildozer.log" ]; then
+            tail -n 50 buildozer.log
+          fi
+          exit 1
         fi
 
     - name: Upload APK/AAB artifact
@@ -92,7 +103,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: kivy-app-build
-        path: bin/*
+        path: |
+          bin/*
+          *.apk
+          *.aab
         retention-days: 30
 
     - name: Upload build logs

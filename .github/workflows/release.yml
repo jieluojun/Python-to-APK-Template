@@ -1,4 +1,4 @@
-name: Build Kivy Android APK
+name: Build Kivy Android APK In Release Mode[span_9](start_span)[span_9](end_span)
 
 on:
   workflow_dispatch:
@@ -14,6 +14,9 @@ env:
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
   CYTHON_LANGUAGE_LEVEL: "3"
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
+  # 绑定您在仓库 Secrets 中配置的签名密码变量[span_10](start_span)[span_10](end_span)
+  KEYSTORE_STOREPASS: ${{ secrets.KEYSTORE_STOREPASS }}
+  KEYSTORE_KEYPASS: ${{ secrets.KEYSTORE_KEYPASS }}
 
 jobs:
   build-android:
@@ -21,16 +24,16 @@ jobs:
  
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4[span_11](start_span)[span_11](end_span)
 
     - name: Set up Java 17
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v4[span_12](start_span)[span_12](end_span)
       with:
         java-version: '17'
         distribution: 'temurin'
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v5[span_13](start_span)[span_13](end_span)
       with:
         python-version: '3.9'
 
@@ -38,26 +41,19 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-            git zip unzip ant \
+            git zip unzip \
             python3-pip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev \
             libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev
+            curl unzip openjdk-17-jdk libltdl-dev[span_14](start_span)[span_14](end_span)
 
     - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
         pip install buildozer cython==0.29.33 kivy kivymd
-        pip install python-for-android
+        pip install python-for-android[span_15](start_span)[span_15](end_span)
 
-    - name: Build APK with Buildozer
-      env:
-        # 将密码正确映射为 python-for-android (p4a) 的标准 Release 签名环境变量
-        P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.KEYSTORE_STOREPASS }}
-        P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.KEYSTORE_KEYPASS }}
-        # 如果你配置了 keystore 路径和 alias，也可以在此处指定：
-        # P4A_RELEASE_KEYSTORE: ${{ github.workspace }}/your_keystore.jks
-        # P4A_RELEASE_KEYALIAS: your_alias
+    - name: Build APK with Buildozer (Release)
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         echo "Let's have a check:"
@@ -68,50 +64,34 @@ jobs:
         export BUILDODER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
  
-        # 提示：如果你目前只是想测试生成 APK，建议临时将 "release" 改为 "debug"（debug 不需要配置复杂的签名密钥）
-        # buildozer -v android debug
-        
-        # 运行构建，如果失败则直接打印最后 100 行日志到控制台以便排查
-        buildozer -v android release 2>&1 | tee buildozer.log || {
-          echo "=== Build failed! Printing last 100 lines of buildozer.log ==="
-          tail -n 100 buildozer.log
-          exit 1
-        }
+        # 执行 release 打包，自动应用签名配置[span_16](start_span)[span_16](end_span)[span_17](start_span)[span_17](end_span)
+        buildozer -v android release 2>&1 | tee buildozer.log
  
-        # 查找所有编译出的 apk 或 aab 并复制到根目录
-        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
-        find . -name "*.aab" -exec cp {} ./ \; 2>/dev/null || true
+        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true[span_18](start_span)[span_18](end_span)
 
-    - name: Check if APK/AAB was built
+    - name: Check if APK was built
       id: check-build
       run: |
-        if ls *.apk 1> /dev/null 2>&1 || ls *.aab 1> /dev/null 2>&1; then
+        if ls *.apk 1> /dev/null 2>&1; then
           echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "找到构建文件:"
-          ls -la *.apk *.aab 2>/dev/null || true
+          echo "Found APK files:"
+          ls -la *.apk
         else
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "未找到构建文件，检查 buildozer.log 末尾："
-          if [ -f "buildozer.log" ]; then
-            tail -n 50 buildozer.log
-          fi
-          exit 1
-        fi
+          echo "Didn't found APK files."
+        fi[span_19](start_span)[span_19](end_span)
 
-    - name: Upload APK/AAB artifact
+    - name: Upload APK artifact
       if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4[span_20](start_span)[span_20](end_span)
       with:
-        name: kivy-app-build
-        path: |
-          bin/*
-          *.apk
-          *.aab
+        name: kivy-app-release-apk
+        path: bin/*.apk
         retention-days: 30
 
     - name: Upload build logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4[span_21](start_span)[span_21](end_span)
       with:
         name: build-logs
         path: |

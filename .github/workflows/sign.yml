@@ -38,11 +38,11 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          git zip unzip \
-          python3-pip autoconf automake libtool \
-          pkg-config zlib1g-dev libncurses5-dev \
-          libncursesw5-dev cmake libffi-dev libssl-dev \
-          curl unzip openjdk-17-jdk libltdl-dev
+            git zip unzip \
+            python3-pip autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses5-dev \
+            libncursesw5-dev cmake libffi-dev libssl-dev \
+            curl unzip openjdk-17-jdk libltdl-dev
 
     - name: Install Buildozer and dependencies
       run: |
@@ -50,64 +50,46 @@ jobs:
         pip install buildozer cython==0.29.33 kivy kivymd
         pip install python-for-android
 
-    # ✅ 关键步骤：还原 keystore
-    - name: Decode and prepare release keystore
+    # ✅ 关键步骤：恢复 keystore
+    - name: Decode Keystore
       run: |
-        echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > release.keystore
-        ls -lh release.keystore
+        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > $HOME/release.keystore
 
-    # ✅ 构建 Signed Release APK
-    - name: Build signed release APK with Buildozer
-      env:
-        KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
-        KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
-        KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
-        KEYALIAS_PASSWORD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+    # ✅ 导出 Buildozer 签名环境变量
+    - name: Export signing env vars
+      run: |
+        echo "KEYSTORE=$HOME/release.keystore" >> $GITHUB_ENV
+        echo "KEYALIAS=${{ secrets.RELEASE_KEYALIAS }}" >> $GITHUB_ENV
+        echo "KEYSTORE_PASSWD=${{ secrets.RELEASE_KEYSTORE_PASSWD }}" >> $GITHUB_ENV
+        echo "KEYALIAS_PASSWD=${{ secrets.RELEASE_KEYALIAS_PASSWD }}" >> $GITHUB_ENV
+
+    - name: Build Signed Release APK
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+        echo "Java version:"
+        java -version
+        echo "Python version:"
+        python --version
+        buildozer --version
 
-        cat > buildozer.spec <<EOF
-[app]
-title = MyApp
-package.name = myapp
-package.domain = org.example
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-version = 1.0
-
-# ✅ 签名配置
-android.release = True
-android.sign = True
-android.keystore_path = $KEYSTORE_PATH
-android.keyalias = $KEYALIAS
-android.keystore_password = $KEYSTORE_PASSWORD
-android.keyalias_password = $KEYALIAS_PASSWORD
-
-# 其他常用配置
-requirements = python3,kivy,kivymd
-orientation = portrait
-fullscreen = 0
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
-EOF
+        export BUILDODER_ALLOW_PLATFORM_EXEC=1
+        export USE_COLORS=0
 
         buildozer -v android release 2>&1 | tee buildozer.log
+
+        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
 
     - name: Check if APK was built
       id: check-build
       run: |
-        mkdir -p bin
-        find . -name "*-release.apk" -exec cp {} bin/ \;
-        if ls bin/*.apk 1>/dev/null 2>&1; then
+        if ls *.apk 1> /dev/null 2>&1; then
           echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          ls -la bin/
+          ls -la *.apk
         else
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Upload signed APK
+    - name: Upload APK artifact
       if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
       uses: actions/upload-artifact@v4
       with:

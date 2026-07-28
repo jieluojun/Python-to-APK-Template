@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+
 独立 LAN-Play / ldn_mitm 房间监控网页（零第三方依赖版）
 
 完全使用 Python 标准库：
@@ -15,7 +16,19 @@
 局域网访问：
     HOST=0.0.0.0 python lan_play_monitor.py
 
-可选，通过环境变量 SERVERS_FILE 指定本地 servers.json 文件的其他路径。
+可选，通过环境变量 SERVERS_FILE 指定本地 servers.json 文件的其他路径。(脚本内置变量路径是"/sdcard/servers.json")
+servers.json 内容格式为：
+[
+  {
+    "id":"my-server", 
+    "name": "我的服务器",
+    "host": "example.com",
+    "port": 11451,
+    "type": "graphql",
+    "region": "🇨🇳"
+  }
+]
+
 """
 from __future__ import annotations
 
@@ -2000,6 +2013,29 @@ class MonitorHandler(BaseHTTPRequestHandler):
 # 启动入口
 # ══════════════════════════════════════════════════════════════════════════════
 
+# 默认
+# if __name__ == "__main__":
+    # host = os.getenv("HOST", "0.0.0.0")
+    # port = int(os.getenv("PORT", "5000"))
+
+    # print(f"[启动] {APP_NAME}")
+    # print(f"[监听] http://{host}:{port}")
+    # print(f"[服务器数] {len(SERVERS)}")
+    # print(f"[缓存TTL] {CACHE_TTL}s  请求超时 {REQUEST_TIMEOUT}s  UDP扫描 {UDP_SCAN_SECONDS}s")
+    # print("按 Ctrl+C 停止")
+
+    # server = HTTPServer((host, port), MonitorHandler)
+    # server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # try:
+        # server.serve_forever()
+    # except KeyboardInterrupt:
+        # print("\n[停止] 正在关闭...")
+        # server.server_close()
+        # for scanner in ACTIVE_SCANNERS.values():
+            # scanner.close()
+        # print("[停止] 已关闭")
+
+# 构建 APK 专用
 if __name__ == "__main__":
     HOST, PORT = "0.0.0.0", 5000
     # 动态加载配置
@@ -2013,3 +2049,57 @@ if __name__ == "__main__":
         pass
     finally:
         server.server_close()
+
+# termux 专用
+# if __name__ == "__main__":
+    # import webbrowser
+    # import subprocess
+
+    # host = os.getenv("HOST", "0.0.0.0")
+    # port = int(os.getenv("PORT", "5000"))
+    # url = f"http://{host}:{port}/"
+
+    # print(f"[启动] {APP_NAME}")
+    # print(f"\033[94m[监听] {url}\033[0m")
+    # print("\033[93m👉 点击上方链接，或用浏览器打开 👈\033[0m")
+
+    # server = HTTPServer((host, port), MonitorHandler)
+    # server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    # def open_browser() -> None:
+        # time.sleep(0.4)
+        # try:
+            # subprocess.run(
+                # ["am", "start", "--user", "0",
+                 # "-a", "android.intent.action.VIEW",
+                 # "-d", url],
+                # stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            # )
+            # print("[系统] 已尝试唤起系统浏览器")
+            # return
+        # except Exception:
+            # pass
+        # try:
+            # subprocess.run(
+                # ["termux-open-url", url],
+                # stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+            # )
+            # print("[Termux] 已尝试打开浏览器")
+            # return
+        # except Exception:
+            # pass
+        # try:
+            # webbrowser.open(url)
+        # except Exception:
+            # pass
+
+    # threading.Thread(target=open_browser, daemon=True).start()
+
+    # try:
+        # server.serve_forever()
+    # except KeyboardInterrupt:
+        # print("\n[停止] 正在关闭...")
+        # server.server_close()
+        # for scanner in ACTIVE_SCANNERS.values():
+            # scanner.close()
+        # print("[停止] 已关闭")

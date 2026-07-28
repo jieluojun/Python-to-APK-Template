@@ -52,17 +52,6 @@ jobs:
         #何意味 You will need it
         pip install python-for-android
 
-
-keytool -genkey -v \
-  -keystore com.lanplay.monitor.keystore \
-  -alias com.lanplay.monitor \
-  -keyalg RSA -keysize 2048 \
-  -validity 10000 \
-  -storepass ${{ secrets.KEYSTORE_PASSWD }} \
-  -keypass ${{ secrets.KEYALIAS_PASSWD }} \
-  -dname "CN=Unknown, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown"
-
-
     - name: Generate signing key (if not exists)
       id: generate_key
       run: |
@@ -73,8 +62,8 @@ keytool -genkey -v \
             -alias com.lanplay.monitor \
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
-            -storepass android \
-            -keypass android \
+            -storepass ${{ secrets.KEYSTORE_PASSWD }} \
+            -keypass ${{ secrets.KEYALIAS_PASSWD }} \
             -dname "CN=Unknown, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown"
           echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
         else

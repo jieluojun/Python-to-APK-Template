@@ -6,8 +6,6 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
 version = 1.0.0
-# 自动追加提交次数
-version_code = $(shell git rev-list --count HEAD)
 # 依赖
 requirements = python3
 icon.filename = icon.png

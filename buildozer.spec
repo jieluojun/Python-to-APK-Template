@@ -40,13 +40,13 @@ android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANA
 exclude_patterns = **/test/*, **/tests/*
 android.aab = False
 
-# 签名配置
+# 签名配置2
 android.release = False
 android.sign = True
-android.sign_key_path = ~/.android/debug.keystore
-android.sign_key_alias = androiddebugkey
-android.sign_store_password = android
-android.sign_key_password = android
+android.keystore = ~/.android/debug.keystore
+android.keystore_storepass = android
+android.keystore_keypass = android
+android.keystore_alias = androiddebugkey
 
 [buildozer]
 log_level = 2

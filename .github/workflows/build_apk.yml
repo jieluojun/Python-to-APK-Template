@@ -157,4 +157,40 @@ jobs:
       if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
       run: |
         echo "=== APK signing certificate ==="
-        keytool -printcert -jarfile bin/*.apk 2>&1 | grep -E "SHA1|S
+        keytool -printcert -jarfile bin/*.apk 2>&1 | grep -E "SHA1|SHA256|Owner"
+
+        echo ""
+        echo "=== Keystore certificate (should match above) ==="
+        keytool -list -v \
+          -keystore ~/.android/debug.keystore \
+          -storepass android \
+          -keypass android \
+          -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256"
+
+        echo ""
+        echo "✅ If the SHA1/SHA256 above match, signing is consistent"
+
+    # ──────────────────────────────────────
+    # 10. 上传 APK
+    # ──────────────────────────────────────
+    - name: Upload APK artifact
+      if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: kivy-app-apk
+        path: bin/*.apk
+        retention-days: 30
+
+    # ──────────────────────────────────────
+    # 11. 上传日志
+    # ──────────────────────────────────────
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          buildozer.log
+          clean.log
+          update.log
+        retention-days: 7

@@ -46,3 +46,11 @@ android.aab = False
 [buildozer]
 log_level = 2
 warn_on_root = 1
+
+[android]
+android.release = False
+android.sign = True
+android.sign_key_alias = androiddebugkey
+android.sign_key_password = android
+android.sign_store_password = android
+android.sign_key_path = ~/.android/debug.keystore

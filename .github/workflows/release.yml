@@ -1,4 +1,4 @@
-name: Build Kivy Android APK In Release Mode
+    name: Build Kivy Android APK In Release Mode
 
 on:
   workflow_dispatch:
@@ -88,8 +88,8 @@ jobs:
         #设置p4a签名环境变量 set p4a signature environment variables
         export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
         export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
-        export P4A_RELEASE_KEYSTORE_PASSWD="${{ secrets.KEYSTORE_PASSWD }}"
-        export P4A_RELEASE_KEYALIAS_PASSWD="${{ secrets.KEYALIAS_PASSWD }}"
+        export P4A_RELEASE_KEYSTORE_PASSWD="${{ secrets.KEYSTORE_STOREPASS }}"
+        export P4A_RELEASE_KEYALIAS_PASSWD="${{ secrets.KEYSTORE_KEYPASS }}"
         
         #buildozer -v android clean 2>&1 | tee clean.log
         #buildozer -v android update 2>&1 | tee update.log

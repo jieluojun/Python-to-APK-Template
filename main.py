@@ -1798,7 +1798,7 @@ if __name__ == "__main__":
     # 动态加载配置
     refresh_config_and_servers()
     
-    server = HTTPServer((HOST, PORT), MonitorHTTPHandler)
+    server = HTTPServer((HOST, PORT), MonitorHandler)
     print(f"[启动] 监控网页服务器已运行在 http://{HOST}:{PORT}/")
     try:
         server.serve_forever()

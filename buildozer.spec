@@ -32,7 +32,6 @@ android.gradle_plugin = 7.4.2
 android.sdk = 33
 android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
-p4a.bootstrap = sdl2
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 android.permissions = INTERNET
 # 强制构建APK，然而并没有用

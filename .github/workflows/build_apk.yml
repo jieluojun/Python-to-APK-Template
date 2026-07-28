@@ -162,7 +162,7 @@ jobs:
         echo ""
         echo "=== Keystore certificate (should match above) ==="
         keytool -list -v \
-          -keystore /root/.android/debug.keystore \
+          -keystore ~/.android/debug.keystore \
           -storepass android \
           -keypass android \
           -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256"

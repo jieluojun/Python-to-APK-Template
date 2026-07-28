@@ -1,4 +1,4 @@
-name: Build Kivy Android APK (Fixed Signature)
+name: Build Kivy Android APK (Single APK + Fixed Signature)
 
 on:
   workflow_dispatch:
@@ -75,7 +75,7 @@ jobs:
         ls -la ~/.android/debug.keystore
 
     # ──────────────────────────────────────
-    # 7. 构建 APK
+    # 7. 构建 APK（clean → update → debug）
     # ──────────────────────────────────────
     - name: Build APK with Buildozer
       run: |
@@ -89,50 +89,66 @@ jobs:
         export BUILDODER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
 
+        # 清理旧构建缓存，确保每次都是干净构建
+        buildozer -v android clean 2>&1 | tee clean.log
+        buildozer -v android update 2>&1 | tee update.log
+
         # 开始构建
         buildozer -v android debug 2>&1 | tee buildozer.log
 
-        # 复制 APK 到根目录方便后续步骤使用
-        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
-
     # ──────────────────────────────────────
-    # 8. 检查 APK 是否构建成功
+    # 8. ★ 校验：只保留一个 APK
     # ──────────────────────────────────────
-    - name: Check if APK was built
-      id: check-build
+    - name: Verify single APK output
+      id: verify-apk
       run: |
-        if ls *.apk 1> /dev/null 2>&1; then
-          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "=== Found APK files ==="
-          ls -la *.apk
-        else
+        echo "=== bin/ directory contents ==="
+        ls -lh bin/
+
+        # 统计 APK 数量
+        apk_count=$(find bin -name "*.apk" -type f | wc -l)
+        echo "APK count: $apk_count"
+
+        if [ "$apk_count" -eq 0 ]; then
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "No APK files found."
+          echo "❌ No APK found in bin/"
+          exit 1
+        elif [ "$apk_count" -eq 1 ]; then
+          echo "✅ Exactly one APK found (expected)"
+        else
+          echo "⚠️ Multiple APKs found ($apk_count), keeping only the latest"
+          # 只保留最新的一个，删除其余
+          cd bin
+          ls -t *.apk | tail -n +2 | xargs rm -f
+          cd ..
+          echo "After cleanup:"
+          ls -lh bin/
         fi
 
-    # ──────────────────────────────────────
-    # 9. 验证签名一致性
-    # ──────────────────────────────────────
-    - name: Verify APK signature
-      if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
-      run: |
-        echo "=== APK Signature Info ==="
-        keytool -printcert -jarfile *.apk || true
-        echo ""
-        echo "=== APK Checksum ==="
-        sha256sum *.apk
+        # 打印哈希值用于校验
+        echo "=== APK SHA256 ==="
+        sha256sum bin/*.apk
+
+        echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
 
     # ──────────────────────────────────────
-    # 10. 上传 APK 产物
+    # 9. 验证签名信息
+    # ──────────────────────────────────────
+    - name: Verify APK signature
+      if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
+      run: |
+        echo "=== APK Signature Info ==="
+        keytool -printcert -jarfile bin/*.apk || true
+
+    # ──────────────────────────────────────
+    # 10. 上传唯一 APK
     # ──────────────────────────────────────
     - name: Upload APK artifact
-      if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
+      if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: kivy-app-apk
-        path: |
-          *.apk
-          bin/*.apk
+        path: bin/*.apk
         retention-days: 30
 
     # ──────────────────────────────────────
@@ -145,4 +161,6 @@ jobs:
         name: build-logs
         path: |
           buildozer.log
+          clean.log
+          update.log
         retention-days: 7

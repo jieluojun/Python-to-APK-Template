@@ -53,6 +53,10 @@ jobs:
         pip install python-for-android
 
     - name: Build APK with Buildozer
+      env:
+        # 注入签名密码环境变量，对应 buildozer.spec 中的配置
+        APP_ANDROID_KEYSTORE_STOREPASS: ${{ secrets.KEYSTORE_STOREPASS }}
+        APP_ANDROID_KEYSTORE_KEYPASS: ${{ secrets.KEYSTORE_KEYPASS }}
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         echo "Let's have a check:"

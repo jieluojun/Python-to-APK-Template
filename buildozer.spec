@@ -41,8 +41,8 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, M
 android.aab = False
 # 签名配置
 android.keystore = com.lanplay.monitor.jks
-android.keystore_storepass = android
-android.keystore_keypass = android
+android.keystore_storepass = 
+android.keystore_keypass = 
 android.keystore_alias = com.lanplay.monitor
 
 [buildozer]

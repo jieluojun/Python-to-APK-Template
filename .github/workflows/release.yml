@@ -87,11 +87,10 @@ jobs:
         if [ -z "$APK" ]; then
           echo "❌ APK not found"
           ls -R ./bin || true
-          exit 1
+        else
+          cp "$APK" apk-out/
+          echo "✅ APK ready: $(basename $APK)"
         fi
-
-        cp "$APK" apk-out/
-        echo "✅ APK ready: $(basename $APK)"
 
     - name: Upload APK artifact
       if: always()

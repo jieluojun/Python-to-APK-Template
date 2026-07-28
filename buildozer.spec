@@ -39,10 +39,11 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, M
 
 # 强制构建APK，然而并没有用
 android.aab = False
+
 # 签名配置
 android.keystore = com.lanplay.monitor.keystore
-android.keystore_storepass = %(ENV:KEYSTORE_STOREPASS)s
-android.keystore_keypass = %(ENV:KEYSTORE_KEYPASS)s
+android.keystore_storepass = %(ENV:KEYSTORE_PASSWD)s
+android.keystore_keypass = %(ENV:KEYALIAS_PASSWD)s
 android.keystore_alias = com.lanplay.monitor
 
 [buildozer]

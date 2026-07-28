@@ -3,8 +3,7 @@ title = LanPlayMonitor
 package.name = monitor
 package.domain = com.lanplay
 source.dir = .
-# source.include_exts = py,png,jpg,kv,atlas,ttf,json
-source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
 version = 1.0.1
 # 依赖
@@ -35,7 +34,7 @@ android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 # 已添加：所有文件访问权权限及 Android 13+ 照片和视频读取权限
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_AUDIO
 # 强制构建APK，然而并没有用
 android.aab = False
 # 签名配置

@@ -37,12 +37,13 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
+        sudo apt-get remove -y openjdk* || true
         sudo apt-get install -y \
           git zip unzip \
           python3-pip autoconf automake libtool \
           pkg-config zlib1g-dev libncurses5-dev \
           libncursesw5-dev cmake libffi-dev libssl-dev \
-          curl openjdk-17-jdk libltdl-dev
+          curl libltdl-dev
 
     - name: Install Buildozer and Python deps
       run: |
@@ -52,11 +53,18 @@ jobs:
     - name: Decode signing key from Base64
       run: |
         echo "Decoding keystore..."
-        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > $GITHUB_WORKSPACE/DomainName.PackageName.keystore
-    
+        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | tr -d '\n' | base64 -d > $HOME/keystore.jks
+
+    - name: Verify keystore
+      run: |
+        keytool -list -v \
+          -keystore $HOME/keystore.jks \
+          -storepass ${{ secrets.RELEASE_KEYSTORE_PASSWD }} \
+          -alias ${{ secrets.RELEASE_KEYALIAS }}
+
     - name: Prepare Android signing env
       run: |
-        echo "P4A_RELEASE_KEYSTORE=$GITHUB_WORKSPACE/DomainName.PackageName.keystore" >> $GITHUB_ENV
+        echo "P4A_RELEASE_KEYSTORE=$HOME/keystore.jks" >> $GITHUB_ENV
         echo "P4A_RELEASE_KEYALIAS=${{ secrets.RELEASE_KEYALIAS }}" >> $GITHUB_ENV
         echo "P4A_RELEASE_KEYSTORE_PASSWD=${{ secrets.RELEASE_KEYSTORE_PASSWD }}" >> $GITHUB_ENV
         echo "P4A_RELEASE_KEYALIAS_PASSWD=${{ secrets.RELEASE_KEYALIAS_PASSWD }}" >> $GITHUB_ENV
@@ -64,36 +72,38 @@ jobs:
     - name: Build APK with Buildozer (Release)
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
+        export USE_COLORS=0
 
         echo "=== Environment Check ==="
         java -version
         python --version
         buildozer --version
 
-        # 修复你原文件里的拼写错误
-        export BUILDOZER_ALLOW_PLATFORM_EXEC=1
-        export USE_COLORS=0
-
-        # 明确禁用 AAB（与你 spec 保持一致）
-        export BUILDOZER_ANDROID_AAB=False
-
         buildozer -v android release 2>&1 | tee buildozer.log
 
-    - name: Locate APK
+    - name: Locate APK (Fixed)
       id: find-apk
       run: |
         mkdir -p apk-out
-        APK=$(find .buildozer -name "*.apk" | head -n 1)
+
+        # ✅ 优先在 bin/ 目录查找 release APK（Buildozer 实际输出位置）
+        APK=$(find ./bin -maxdepth 1 -name "*release.apk" | head -n 1)
+
         if [ -z "$APK" ]; then
+          echo "❌ APK not found in ./bin"
+          ls -R ./bin || true
           echo "APK_NOT_FOUND=true" >> $GITHUB_OUTPUT
           exit 1
         fi
+
         cp "$APK" apk-out/
+        echo "✅ Found APK: $APK"
         echo "APK_PATH=$APK" >> $GITHUB_OUTPUT
         echo "APK_NAME=$(basename $APK)" >> $GITHUB_OUTPUT
 
     - name: Upload APK artifact
-      if: success()
+      if: steps.find-apk.outputs.APK_NAME != ''
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.find-apk.outputs.APK_NAME }}

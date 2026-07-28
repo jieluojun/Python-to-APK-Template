@@ -41,10 +41,10 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, M
 android.aab = False
 
 # 签名配置
-android.release_keystore = %(P4A_RELEASE_KEYSTORE)s
-android.release_keyalias = %(P4A_RELEASE_KEYALIAS)s
-android.release_keystore_passwd = %(P4A_RELEASE_KEYSTORE_PASSWD)s
-android.release_keyalias_passwd = %(P4A_RELEASE_KEYALIAS_PASSWD)s
+android.release_keystore = /home/runner/keystore.jks
+android.release_keyalias = %(ENV_RELEASE_KEYALIAS)s
+android.release_keystore_passwd = %(ENV_RELEASE_KEYSTORE_PASSWD)s
+android.release_keyalias_passwd = %(ENV_RELEASE_KEYALIAS_PASSWD)s
 
 [buildozer]
 log_level = 2

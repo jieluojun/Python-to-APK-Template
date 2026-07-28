@@ -3,11 +3,11 @@ title = LanPlayMonitor
 package.name = monitor
 package.domain = com.lanplay
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
 version = 1.0.0
 # 依赖
-requirements = python3,kivy,kivymd,openssl,certifi,libiconv,libffi
+requirements = python3
 icon.filename = icon.png
 # presplash.filename = presplash.png # 启动界面图片
 # 0=不启用全屏，1=启用全屏
@@ -15,6 +15,12 @@ fullscreen = 0
 # 应用竖屏
 orientation = portrait
 entrypoint = main.py
+# ==================== 关键配置 ====================
+# 使用 webview 引导程序，让应用内嵌浏览器直接渲染网页
+p4a.bootstrap = webview
+# 指定 webserver 端口，需与 Python 脚本中监听的端口保持一致
+p4a.port = 5000
+# ================================================
 android.accept_sdk_license = True
 android.allow_api_min = 21
 android.api = 33
@@ -40,3 +46,7 @@ android.keystore_alias = com.lanplay.monitor
 [buildozer]
 log_level = 2
 warn_on_root = 1
+
+
+
+

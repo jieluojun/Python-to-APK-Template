@@ -1431,6 +1431,7 @@ PAGE_HTML = r"""<!doctype html>
       list.querySelectorAll('.server-group').forEach(el => { existing.set(el.dataset.id, el); });
     }
 
+    // 对比并处理新增/移除的服务器，确保 _domCache 正确重建或同步
     const currentIds = new Set(state.servers.map(s => s.id));
     for (const [id, el] of existing.entries()) {
       if (!currentIds.has(id)) {
@@ -1789,81 +1790,19 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "仅支持 GET 请求"}, status=405)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 启动入口 (支持 Kivy Android 内嵌 WebView 启动)
+# 启动入口
 # ══════════════════════════════════════════════════════════════════════════════
 
-def start_server():
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", "5000"))
+if __name__ == "__main__":
+    HOST, PORT = "0.0.0.0", 5000
+    # 动态加载配置
+    refresh_config_and_servers()
     
-    print(f"[启动] {APP_NAME}")
-    print(f"[监听] http://{host}:{port}")
-    
-    server = HTTPServer((host, port), MonitorHandler)
-    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server = HTTPServer((HOST, PORT), MonitorHTTPHandler)
+    print(f"[启动] 监控网页服务器已运行在 http://{HOST}:{PORT}/")
     try:
         server.serve_forever()
-    except Exception:
-        server.server_close()
-
-from kivy.app import App
-from kivy.clock import Clock
-from kivy.uix.widget import Widget
-from kivy.utils import platform
-
-if platform == 'android':
-    from jnius import autoclass
-    from android.runnable import run_on_ui_thread
-
-    WebView = autoclass('android.webkit.WebView')
-    WebViewClient = autoclass('android.webkit.WebViewClient')
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-
-    class BrowserWidget(Widget):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            # 延时 0.5 秒确保 Activity 完全准备就绪，避免闪退
-            Clock.schedule_once(self.create_webview, 0.5)
-
-        @run_on_ui_thread
-        def create_webview(self, *args):
-            try:
-                activity = PythonActivity.mActivity
-                webview = WebView(activity)
-                settings = webview.getSettings()
-                settings.setJavaScriptEnabled(True)
-                settings.setDomStorageEnabled(True)
-                settings.setLoadWithOverviewMode(True)
-                settings.setUseWideViewPort(True)
-                settings.setDatabaseEnabled(True)
-                
-                wvc = WebViewClient()
-                webview.setWebViewClient(wvc)
-                
-                # 加载本地后端服务页面
-                webview.loadUrl('http://127.0.0.1:5000/')
-                activity.setContentView(webview)
-            except Exception as e:
-                print(f"[UI错误] 初始化 WebView 失败: {e}")
-
-    class LanPlayMonitorApp(App):
-        def build(self):
-            t = threading.Thread(target=start_server, daemon=True)
-            t.start()
-            return BrowserWidget()
-else:
-    class LanPlayMonitorApp(App):
-        def build(self):
-            t = threading.Thread(target=start_server, daemon=True)
-            t.start()
-            print("请在浏览器打开 http://127.0.0.1:5000/")
-            return Widget()
-
-if __name__ == "__main__":
-    try:
-        LanPlayMonitorApp().run()
     except KeyboardInterrupt:
-        print("\n[停止] 正在关闭...")
-        for scanner in ACTIVE_SCANNERS.values():
-            scanner.close()
-        print("[停止] 已关闭")
+        pass
+    finally:
+        server.server_close()

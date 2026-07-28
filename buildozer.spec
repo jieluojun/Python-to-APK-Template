@@ -37,20 +37,16 @@ p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_AUDIO
 # 强制构建APK，然而并没有用
 android.aab = False
-# 签名配置
-# android.release_keystore = /home/runner/keystore.jks
-# android.release_keyalias = %(ENV_RELEASE_KEYALIAS)s
-# android.release_keystore_passwd = %(ENV_RELEASE_KEYSTORE_PASSWD)s
-# android.release_keyalias_passwd = %(ENV_RELEASE_KEYALIAS_PASSWD)s
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
 
 [android]
+android.archs = arm64-v8a
 android.release = False
 android.sign = True
 android.sign_key_alias = androiddebugkey
-android.sign_key_password = android
 android.sign_store_password = android
+android.sign_key_password = android
 android.sign_key_path = ~/.android/debug.keystore

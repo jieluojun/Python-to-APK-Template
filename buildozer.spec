@@ -35,17 +35,18 @@ p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO
 
-# 使用固定签名
-android.release = False
-android.sign = True
-android.sign_key_alias = androiddebugkey
-android.sign_store_password = android
-android.sign_key_password = android
-android.sign_key_path = ~/.android/debug.keystore
-
 exclude_patterns = **/test/*, **/tests/*
 android.aab = False
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
+# 签名配置
+android.release = False
+# 关键：指向 keystore 的绝对路径
+android.keystore = ~/.android/debug.keystore
+android.storepass = android
+android.keypass = android
+android.alias = androiddebugkey
+# 强制使用特定架构
+android.archs = arm64-v8a

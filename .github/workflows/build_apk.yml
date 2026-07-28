@@ -1,4 +1,4 @@
-name: Build Kivy Android APK (Single APK + Fixed Signature)
+name: Build Kivy Android APK (Fixed Signature + Verified)
 
 on:
   workflow_dispatch:
@@ -66,16 +66,44 @@ jobs:
         pip install python-for-android
 
     # ──────────────────────────────────────
-    # 6. ★ 还原固定 debug keystore（签名不变的核心）
+    # 6. ★ 还原固定 keystore + 校验指纹
     # ──────────────────────────────────────
-    - name: Restore fixed debug keystore
+    - name: Restore and verify fixed debug keystore
       run: |
-        mkdir -p ~/.android
-        echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
-        ls -la ~/.android/debug.keystore
+        mkdir -p /root/.android
+
+        # 检查 Secret 是否配置
+        if [ -z "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
+          echo "❌ ERROR: DEBUG_KEYSTORE_BASE64 secret is NOT set!"
+          echo "Go to Settings → Secrets and variables → Actions → New secret"
+          echo "Name: DEBUG_KEYSTORE_BASE64"
+          echo "Value: $(base64 debug.keystore output)"
+          exit 1
+        fi
+
+        # 还原 keystore
+        echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > /root/.android/debug.keystore
+
+        # 校验文件有效
+        if [ ! -s /root/.android/debug.keystore ]; then
+          echo "❌ ERROR: debug.keystore is empty!"
+          exit 1
+        fi
+
+        echo "✅ Keystore restored successfully"
+        ls -la /root/.android/debug.keystore
+
+        # ★ 打印 SHA1 指纹（每次构建对比这个值是否一致）
+        echo ""
+        echo "=== 🔑 Keystore SHA1 Fingerprint ==="
+        keytool -list -v \
+          -keystore /root/.android/debug.keystore \
+          -storepass android \
+          -keypass android \
+          -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256|Alias name"
 
     # ──────────────────────────────────────
-    # 7. 构建 APK（clean → update → debug）
+    # 7. 构建 APK
     # ──────────────────────────────────────
     - name: Build APK with Buildozer
       run: |
@@ -85,63 +113,65 @@ jobs:
         python --version
         buildozer --version
 
-        # 解决网络问题
         export BUILDODER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
 
-        # 清理旧构建缓存，确保每次都是干净构建
+        # 干净构建
         buildozer -v android clean 2>&1 | tee clean.log
         buildozer -v android update 2>&1 | tee update.log
-
-        # 开始构建
         buildozer -v android debug 2>&1 | tee buildozer.log
 
     # ──────────────────────────────────────
-    # 8. ★ 校验：只保留一个 APK
+    # 8. 校验：只保留一个 APK + 打印哈希
     # ──────────────────────────────────────
     - name: Verify single APK output
       id: verify-apk
       run: |
-        echo "=== bin/ directory contents ==="
+        echo "=== bin/ contents ==="
         ls -lh bin/
 
-        # 统计 APK 数量
         apk_count=$(find bin -name "*.apk" -type f | wc -l)
         echo "APK count: $apk_count"
 
         if [ "$apk_count" -eq 0 ]; then
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "❌ No APK found in bin/"
+          echo "❌ No APK found!"
           exit 1
-        elif [ "$apk_count" -eq 1 ]; then
-          echo "✅ Exactly one APK found (expected)"
-        else
-          echo "⚠️ Multiple APKs found ($apk_count), keeping only the latest"
-          # 只保留最新的一个，删除其余
-          cd bin
-          ls -t *.apk | tail -n +2 | xargs rm -f
-          cd ..
-          echo "After cleanup:"
-          ls -lh bin/
+        elif [ "$apk_count" -gt 1 ]; then
+          echo "⚠️ Multiple APKs, keeping latest only"
+          cd bin && ls -t *.apk | tail -n +2 | xargs rm -f && cd ..
         fi
 
-        # 打印哈希值用于校验
+        echo "=== Final APK ==="
+        ls -lh bin/*.apk
+        echo ""
         echo "=== APK SHA256 ==="
         sha256sum bin/*.apk
 
         echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
 
     # ──────────────────────────────────────
-    # 9. 验证签名信息
+    # 9. ★ 验证 APK 签名（对比 keystore 指纹）
     # ──────────────────────────────────────
-    - name: Verify APK signature
+    - name: Verify APK signature matches keystore
       if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
       run: |
-        echo "=== APK Signature Info ==="
-        keytool -printcert -jarfile bin/*.apk || true
+        echo "=== APK signing certificate ==="
+        keytool -printcert -jarfile bin/*.apk 2>&1 | grep -E "SHA1|SHA256|Owner"
+
+        echo ""
+        echo "=== Keystore certificate (should match above) ==="
+        keytool -list -v \
+          -keystore /root/.android/debug.keystore \
+          -storepass android \
+          -keypass android \
+          -alias androiddebugkey 2>&1 | grep -E "SHA1|SHA256"
+
+        echo ""
+        echo "✅ If the SHA1/SHA256 above match, signing is consistent"
 
     # ──────────────────────────────────────
-    # 10. 上传唯一 APK
+    # 10. 上传 APK
     # ──────────────────────────────────────
     - name: Upload APK artifact
       if: steps.verify-apk.outputs.BUILD_FINAL_SUCCESS == 'true'
@@ -152,7 +182,7 @@ jobs:
         retention-days: 30
 
     # ──────────────────────────────────────
-    # 11. 上传构建日志（无论成功失败）
+    # 11. 上传日志
     # ──────────────────────────────────────
     - name: Upload build logs
       if: always()

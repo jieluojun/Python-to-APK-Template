@@ -4,20 +4,20 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
-  checks: read
 
 env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   ANDROID_HOME: /usr/local/lib/android/sdk
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
   CYTHON_LANGUAGE_LEVEL: "3"
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code
@@ -38,98 +38,77 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-            git zip unzip \
-            python3-pip autoconf automake libtool \
-            pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev
+          git zip unzip \
+          python3-pip autoconf automake libtool \
+          pkg-config zlib1g-dev libncurses5-dev \
+          libncursesw5-dev cmake libffi-dev libssl-dev \
+          curl openjdk-17-jdk libltdl-dev patchelf \
+          lld ninja-build
 
-    - name: Install Buildozer and dependencies
+    - name: Install Buildozer and locked deps
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython==0.29.33 kivy kivymd
-        pip install python-for-android
+        pip install cython==0.29.33
+        pip install "kivy==2.2.1" "kivymd==1.1.5"
+        pip install buildozer python-for-android
 
     - name: Generate signing key (if not exists)
-      id: generate_key
       run: |
         if [ ! -f "com.lanplay.monitor.keystore" ]; then
-          echo "创建新的密钥库..."
+          echo "Creating new keystore..."
           keytool -genkey -v \
             -keystore com.lanplay.monitor.keystore \
             -alias com.lanplay.monitor \
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
-            -storepass ${{ secrets.KEYSTORE_PASSWD }} \
-            -keypass ${{ secrets.KEYALIAS_PASSWD }} \
+            -storepass "${{ secrets.KEYSTORE_PASSWD }}" \
+            -keypass "${{ secrets.KEYALIAS_PASSWD }}" \
             -dname "CN=Unknown, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown"
-          echo "KEY_CREATED=true" >> $GITHUB_OUTPUT
         else
-          echo "使用现有的密钥库。"
-          echo "KEY_CREATED=false" >> $GITHUB_OUTPUT
+          echo "Using existing keystore."
         fi
 
     - name: Build APK with Buildozer (Release)
       run: |
-        set -o pipefail  # 核心修复：捕获 buildozer 的真实退出码，防止报错被 tee 掩盖
+        set -e
         export PATH="$HOME/.local/bin:$PATH"
-        echo "我们来检查一下："
-        java -version
-        python --version
-        buildozer --version
-        
-        export BUILDODER_ALLOW_PLATFORM_EXEC=1
+        export BUILDOZER_ALLOW_PLATFORM_EXEC=1   # ✅ 修正拼写
         export USE_COLORS=0
-        
+
         export P4A_RELEASE_KEYSTORE="$PWD/com.lanplay.monitor.keystore"
         export P4A_RELEASE_KEYALIAS="com.lanplay.monitor"
         export P4A_RELEASE_KEYSTORE_PASSWD="${{ secrets.KEYSTORE_PASSWD }}"
         export P4A_RELEASE_KEYALIAS_PASSWD="${{ secrets.KEYALIAS_PASSWD }}"
-        
-        buildozer -v android release 2>&1 | tee buildozer.log
-        
-        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
-        find . -name "*.aab" -exec cp {} ./ \; 2>/dev/null || true
 
-    - name: Check if APK/AAB was built
-      id: check-build
-      run: |
-        if ls *.apk 1> /dev/null 2>&1 || ls *.aab 1> /dev/null 2>&1; then
-          echo "BUILD_FINAL_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "找到构建文件："
-          ls -la *.apk *.aab 2>/dev/null || true
-        else
-          echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
-          echo "没有找到构建文件。"
-          echo "检查构建目录。"
-          find .buildozer -name "*.apk" -o -name "*.aab" -type f 2>/dev/null | head -10
+        # 清理 + 明确指定 arch，减少坑
+        buildozer android clean
+        buildozer -v android release
+
+        echo "=== APK search ==="
+        find .buildozer -name "*.apk" | tee apk_list.txt
+
+        # ✅ 强制失败：没 APK 就红
+        if [ ! -s apk_list.txt ]; then
+          echo "::error::No APK generated"
+          exit 1
         fi
 
-    - name: Upload APK/AAB artifact
-      if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: kivy-app-build
-        path: |
-          *.apk
-          *.aab
-          bin/*.apk
-          bin/*.aab
-        retention-days: 30
+    - name: Copy APK to bin/
+      run: |
+        mkdir -p bin
+        find .buildozer -name "*.apk" -exec cp {} bin/ \;
 
-    - name: Upload signing key (if newly created)
-      if: steps.generate_key.outputs.KEY_CREATED == 'true'
+    - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: android-keystore
-        path: com.lanplay.monitor.keystore
-        retention-days: 1
+        name: kivy-app-release-apk
+        path: bin/*.apk
+        retention-days: 30
 
     - name: Upload build logs
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: |
-          buildozer.log
+        path: buildozer.log
         retention-days: 7

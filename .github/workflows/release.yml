@@ -1,4 +1,4 @@
-name: Build Kivy Android APK In Release Mode[span_9](start_span)[span_9](end_span)
+name: Build Kivy Android APK In Release Mode
 
 on:
   workflow_dispatch:
@@ -14,7 +14,6 @@ env:
   JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
   CYTHON_LANGUAGE_LEVEL: "3"
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.java-home=$JAVA_HOME -Dorg.gradle.jvmargs=-Xmx2048m"
-  # 绑定您在仓库 Secrets 中配置的签名密码变量[span_10](start_span)[span_10](end_span)
   KEYSTORE_STOREPASS: ${{ secrets.KEYSTORE_STOREPASS }}
   KEYSTORE_KEYPASS: ${{ secrets.KEYSTORE_KEYPASS }}
 
@@ -24,16 +23,16 @@ jobs:
  
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4[span_11](start_span)[span_11](end_span)
+      uses: actions/checkout@v4
 
     - name: Set up Java 17
-      uses: actions/setup-java@v4[span_12](start_span)[span_12](end_span)
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
 
     - name: Set up Python
-      uses: actions/setup-python@v5[span_13](start_span)[span_13](end_span)
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
 
@@ -45,13 +44,13 @@ jobs:
             python3-pip autoconf automake libtool \
             pkg-config zlib1g-dev libncurses5-dev \
             libncursesw5-dev cmake libffi-dev libssl-dev \
-            curl unzip openjdk-17-jdk libltdl-dev[span_14](start_span)[span_14](end_span)
+            curl unzip openjdk-17-jdk libltdl-dev
 
     - name: Install Buildozer and dependencies
       run: |
         python -m pip install --upgrade pip
         pip install buildozer cython==0.29.33 kivy kivymd
-        pip install python-for-android[span_15](start_span)[span_15](end_span)
+        pip install python-for-android
 
     - name: Build APK with Buildozer (Release)
       run: |
@@ -64,10 +63,9 @@ jobs:
         export BUILDODER_ALLOW_PLATFORM_EXEC=1
         export USE_COLORS=0
  
-        # 执行 release 打包，自动应用签名配置[span_16](start_span)[span_16](end_span)[span_17](start_span)[span_17](end_span)
         buildozer -v android release 2>&1 | tee buildozer.log
  
-        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true[span_18](start_span)[span_18](end_span)
+        find . -name "*.apk" -exec cp {} ./ \; 2>/dev/null || true
 
     - name: Check if APK was built
       id: check-build
@@ -79,11 +77,11 @@ jobs:
         else
           echo "BUILD_FINAL_SUCCESS=false" >> $GITHUB_OUTPUT
           echo "Didn't found APK files."
-        fi[span_19](start_span)[span_19](end_span)
+        fi
 
     - name: Upload APK artifact
       if: steps.check-build.outputs.BUILD_FINAL_SUCCESS == 'true'
-      uses: actions/upload-artifact@v4[span_20](start_span)[span_20](end_span)
+      uses: actions/upload-artifact@v4
       with:
         name: kivy-app-release-apk
         path: bin/*.apk
@@ -91,7 +89,7 @@ jobs:
 
     - name: Upload build logs
       if: always()
-      uses: actions/upload-artifact@v4[span_21](start_span)[span_21](end_span)
+      uses: actions/upload-artifact@v4
       with:
         name: build-logs
         path: |

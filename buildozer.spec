@@ -26,7 +26,7 @@ android.minapi = 21
 android.ndk = 25b
 android.sdk = 33
 android.ndk_api = 21
-android.archs = arm64-v8a
+# android.archs = arm64-v8a
 
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
 android.gradle_plugin = 7.4.2
@@ -38,15 +38,16 @@ android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANA
 exclude_patterns = **/test/*, **/tests/*
 android.aab = False
 
+# 签名配置
+android.release = False
+android.sign = True
+android.sign_key_path = ~/.android/debug.keystore
+android.sign_key_alias = androiddebugkey
+android.sign_store_password = android
+android.sign_key_password = android
+
 [buildozer]
 log_level = 2
 warn_on_root = 1
-# 签名配置
-android.release = False
-# 关键：指向 keystore 的绝对路径
-android.keystore = ~/.android/debug.keystore
-android.storepass = android
-android.keypass = android
-android.alias = androiddebugkey
 # 强制使用特定架构
 android.archs = arm64-v8a

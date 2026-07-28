@@ -7,7 +7,8 @@ source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
 version = 1.0.1
 # 依赖
-requirements = python3
+#requirements = python3
+requirements = python3==3.11.12
 icon.filename = icon.png
 # presplash.filename = presplash.png # 启动界面图片
 # 0=不启用全屏，1=启用全屏

@@ -41,8 +41,10 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, M
 android.aab = False
 
 # 签名配置
-android.keystore = com.lanplay.monitor.keystore
-android.keystore_alias = com.lanplay.monitor
+android.release_keystore = %(P4A_RELEASE_KEYSTORE)s
+android.release_keyalias = %(P4A_RELEASE_KEYALIAS)s
+android.release_keystore_passwd = %(P4A_RELEASE_KEYSTORE_PASSWD)s
+android.release_keyalias_passwd = %(P4A_RELEASE_KEYALIAS_PASSWD)s
 
 [buildozer]
 log_level = 2

@@ -29,6 +29,8 @@ android.ndk = 25b
 exclude_patterns = **/test/*, **/tests/*
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
 android.gradle_plugin = 7.4.2
+android.sdk = 33
+android.ndk_api = 21
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
@@ -38,7 +40,7 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, M
 # 强制构建APK，然而并没有用
 android.aab = False
 # 签名配置
-android.keystore = com.lanplay.monitor.jks
+android.keystore = com.lanplay.monitor.keystore
 android.keystore_storepass = %(ENV:KEYSTORE_STOREPASS)s
 android.keystore_keypass = %(ENV:KEYSTORE_KEYPASS)s
 android.keystore_alias = com.lanplay.monitor

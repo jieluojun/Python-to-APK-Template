@@ -46,6 +46,7 @@ android.aab = False
 # 签名配置
 android.release = False
 android.keystore = /home/runner/work/RepositoryName/AndAgain/com.lanplay.monitor.keystore
+android.keystore = com.lanplay.monitor.keystore
 android.keystore_storepass = android
 android.keystore_keypass = android
 android.keystore_alias = com.lanplay.monitor

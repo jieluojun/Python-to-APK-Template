@@ -5,7 +5,7 @@ package.domain = com.lanplay
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json
 source.include_patterns = image/*
-version = 1.0.0
+version = 1.0.1
 
 # ===== WebView 配置 =====
 p4a.bootstrap = webview
@@ -30,23 +30,22 @@ android.ndk_api = 21
 # 强制使用特定架构
 android.archs = arm64-v8a
 
-ndroid.aab = False
-android.permissions = INTERNET
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
 android.gradle_plugin = 7.4.2
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
+android.permissions = INTERNET
+
 exclude_patterns = **/test/*, **/tests/*
-a
+android.aab = False
 
 # 签名配置
 android.release = False
-android.sign = True
-android.keystore = ~/.android/debug.keystore
+android.keystore = /home/runner/work/RepositoryName/AndAgain/debug.keystore
 android.keystore_storepass = android
 android.keystore_keypass = android
-android.keystore_alias = androiddebugkey
+android.keystore_alias = com.lanplay.monitor
 
 [buildozer]
 log_level = 2

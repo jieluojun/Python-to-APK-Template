@@ -30,17 +30,17 @@ android.ndk_api = 21
 # 强制使用特定架构
 android.archs = arm64-v8a
 
+ndroid.aab = False
+android.permissions = INTERNET
 android.gradle_download = https://services.gradle.org/distributions/gradle-7.6.4-all.zip
 android.gradle_plugin = 7.4.2
 p4a.gradle_dependencies = gradle:7.6.4
 p4a.gradle_options = -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64
 
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO
-
 exclude_patterns = **/test/*, **/tests/*
-android.aab = False
+a
 
-# 签名配置2
+# 签名配置
 android.release = False
 android.sign = True
 android.keystore = ~/.android/debug.keystore
